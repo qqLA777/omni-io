@@ -10,14 +10,7 @@
   },
   "categories": ["Themes"],
   "contributes": {
-    "themes": [
-      {
-        "id": "Solarized Dark",
-        "label": "%themeLabel%",
-        "uiTheme": "vs-dark",
-        "path": "./themes/solarized-dark-color-theme.json"
-      }
-    ]
+    "themes": []
   },
   "repository": {
     "type": "git",

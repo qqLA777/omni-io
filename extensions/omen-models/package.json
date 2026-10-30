@@ -1,0 +1,182 @@
+{
+  "name": "omen-models",
+  "displayName": "Omen AI Models & Downloader",
+  "description": "Universal Language Model Provider (DeepSeek, OpenAI, Ollama) and In-Editor Model Downloader for Omen",
+  "version": "0.1.0",
+  "publisher": "omen",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Machine Learning"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "enabledApiProposals": [
+    "chatProvider"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "omen",
+        "displayName": "Omen AI Models"
+      }
+    ],
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "omen-docs",
+          "title": "Docs & RAG",
+          "icon": "$(book)"
+        },
+        {
+          "id": "omen-cluster",
+          "title": "Cluster",
+          "icon": "$(server-process)"
+        }
+      ]
+    },
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "omen.agentsView",
+          "name": "Agents",
+          "icon": "$(robot)",
+          "order": 100
+        }
+      ],
+      "omen-docs": [
+        {
+          "type": "webview",
+          "id": "omen.docsView",
+          "name": "Docs & RAG",
+          "icon": "$(book)"
+        }
+      ],
+      "omen-cluster": [
+        {
+          "type": "webview",
+          "id": "omen.clusterView",
+          "name": "Compute Cluster",
+          "icon": "$(server-process)"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "omen.manageModels",
+        "title": "Manage & Download Local Models (Ollama)",
+        "category": "Omen"
+      },
+      {
+        "command": "omen.setApiKey",
+        "title": "Set API Key (Meta Muse / DeepSeek / OpenAI)",
+        "category": "Omen"
+      },
+      {
+        "command": "omen.refreshModels",
+        "title": "Refresh AI Models",
+        "category": "Omen"
+      },
+      {
+        "command": "omen.openDocsHub",
+        "title": "Open Docs & RAG Hub (Right Side Bar)",
+        "category": "Omen"
+      },
+      {
+        "command": "omen.openClusterHub",
+        "title": "Open Compute Cluster & Pairing Portal (Right Side Bar)",
+        "category": "Omen"
+      },
+      {
+        "command": "omen.openAgentsView",
+        "title": "Focus Agents Pane (Explorer)",
+        "category": "Omen"
+      },
+      {
+        "command": "omen.newAgent",
+        "title": "Start New Agent Task",
+        "category": "Omen"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "omen.openAgentsView"
+        },
+        {
+          "command": "omen.newAgent"
+        },
+        {
+          "command": "omen.manageModels"
+        },
+        {
+          "command": "omen.setApiKey"
+        },
+        {
+          "command": "omen.refreshModels"
+        },
+        {
+          "command": "omen.openDocsHub"
+        },
+        {
+          "command": "omen.openClusterHub"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Omen AI Models",
+      "properties": {
+        "omen.providers.deepseek.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable DeepSeek models (deepseek-chat, deepseek-reasoner)"
+        },
+        "omen.providers.deepseek.baseUrl": {
+          "type": "string",
+          "default": "https://api.deepseek.com/v1",
+          "description": "Custom DeepSeek API endpoint"
+        },
+        "omen.providers.openai.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable OpenAI models (gpt-4o, gpt-4o-mini, o1, o3-mini)"
+        },
+        "omen.providers.openai.baseUrl": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "Custom OpenAI API endpoint"
+        },
+        "omen.providers.meta.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Meta models (Muse Spark, Muse Wonder, Llama 3.3)"
+        },
+        "omen.providers.meta.baseUrl": {
+          "type": "string",
+          "default": "https://api.meta.com/v1",
+          "description": "Meta Model API endpoint URL (or OpenAI-compatible proxy)"
+        },
+        "omen.providers.ollama.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable local Ollama model auto-discovery"
+        },
+        "omen.providers.ollama.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Local or LAN Ollama endpoint URL"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./"
+  }
+}

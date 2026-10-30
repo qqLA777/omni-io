@@ -14,6 +14,7 @@ import { Codicon } from '../../../../base/common/codicons.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 import { OutlineConfigKeys } from '../../../services/outline/browser/outline.js';
 import { IOutlinePane } from './outline.js';
+import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 
 // --- actions
 
@@ -30,7 +31,8 @@ Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([{
 	ctorDescriptor: new SyncDescriptor(OutlinePane),
 	canToggleVisibility: true,
 	canMoveView: true,
-	hideByDefault: false,
+	hideByDefault: true,
+	when: ContextKeyExpr.false(),
 	collapsed: true,
 	order: 2,
 	weight: 30,

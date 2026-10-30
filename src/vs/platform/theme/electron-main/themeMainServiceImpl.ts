@@ -20,8 +20,8 @@ import { IThemeMainService } from './themeMainService.js';
 
 // These default colors match our default themes
 // editor background color ("Dark Modern", etc...)
-const DEFAULT_BG_LIGHT = '#FFFFFF';
-const DEFAULT_BG_DARK = '#1F1F1F';
+const DEFAULT_BG_LIGHT = '#141414';
+const DEFAULT_BG_DARK = '#141414';
 const DEFAULT_BG_HC_BLACK = '#000000';
 const DEFAULT_BG_HC_LIGHT = '#FFFFFF';
 
@@ -43,9 +43,9 @@ class Setting<T> {
 namespace Setting {
 	export const DETECT_COLOR_SCHEME = new Setting<boolean>('window.autoDetectColorScheme', false);
 	export const DETECT_HC = new Setting<boolean>('window.autoDetectHighContrast', true);
-	export const SYSTEM_COLOR_THEME = new Setting<'default' | 'auto' | 'light' | 'dark'>('window.systemColorTheme', 'default');
-	export const AUXILIARYBAR_DEFAULT_VISIBILITY = new Setting<'hidden' | 'visibleInWorkspace' | 'visible' | 'maximizedInWorkspace' | 'maximized'>('workbench.secondarySideBar.defaultVisibility', 'visibleInWorkspace');
-	export const STARTUP_EDITOR = new Setting<'none' | 'welcomePage' | 'readme' | 'newUntitledFile' | 'welcomePageInEmptyWorkbench' | 'terminal' | 'agentSessionsWelcomePage'>('workbench.startupEditor', 'welcomePage');
+	export const SYSTEM_COLOR_THEME = new Setting<'default' | 'auto' | 'light' | 'dark'>('window.systemColorTheme', 'dark');
+	export const AUXILIARYBAR_DEFAULT_VISIBILITY = new Setting<'hidden' | 'visibleInWorkspace' | 'visible' | 'maximizedInWorkspace' | 'maximized'>('workbench.secondarySideBar.defaultVisibility', 'visible');
+	export const STARTUP_EDITOR = new Setting<'none' | 'welcomePage' | 'readme' | 'newUntitledFile' | 'welcomePageInEmptyWorkbench' | 'terminal' | 'agentSessionsWelcomePage'>('workbench.startupEditor', 'none');
 }
 
 interface IPartSplashOverrideWorkspaces {
@@ -189,6 +189,10 @@ export class ThemeMainService extends Disposable implements IThemeMainService {
 	}
 
 	getBackgroundColor(): string {
+		if (isMacintosh) {
+			return '#00000000';
+		}
+
 		const preferred = this.getPreferredBaseTheme();
 		const stored = this.getStoredBaseTheme();
 
@@ -327,6 +331,10 @@ export class ThemeMainService extends Disposable implements IThemeMainService {
 	}
 
 	private updateBackgroundColor(windowId: number, splash: IPartsSplash): void {
+		if (isMacintosh) {
+			return;
+		}
+
 		for (const window of getAllWindowsExcludingOffscreen()) {
 			if (window.id === windowId) {
 				window.setBackgroundColor(splash.colorInfo.background);

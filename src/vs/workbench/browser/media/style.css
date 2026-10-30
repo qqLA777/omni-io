@@ -365,3 +365,51 @@ body {
 	outline: 1px dashed var(--vscode-toolbar-hoverOutline);
 	outline-offset: -1px;
 }
+
+/* Omen Dark — macOS Native Vibrancy & Single-Layer Translucency */
+
+body:has(> .monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light)) {
+	background-color: transparent !important;
+}
+
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) {
+	background-color: rgba(20, 20, 20, 0.93) !important;
+}
+
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light).floating-panels > .monaco-grid-view,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.titlebar,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.statusbar {
+	background-color: transparent !important;
+}
+
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.editor,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.editor > .content,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.editor > .content .editor-group-container,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.editor > .content .monaco-editor,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.editor > .content .monaco-editor .margin,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.editor > .content .monaco-editor .monaco-editor-background {
+	background-color: transparent !important;
+}
+
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.editor > .content .editor-group-container > .title.tabs {
+	background-color: rgba(255, 255, 255, 0.012) !important;
+}
+
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.editor > .content .monaco-editor .sticky-widget {
+	background-color: #141414F5 !important;
+}
+
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.sidebar,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.auxiliarybar,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.panel {
+	background-color: rgba(255, 255, 255, 0.012) !important;
+}
+
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.sidebar > .title,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.sidebar > .header-or-footer,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.auxiliarybar > .title,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.auxiliarybar > .header-or-footer,
+.monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.panel > .title {
+	background-color: transparent !important;
+}
+

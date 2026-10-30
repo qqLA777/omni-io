@@ -175,7 +175,7 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	private resolveConfiguration(): IAuxiliaryBarPartConfiguration {
 		const position = this.configurationService.getValue<ActivityBarPosition>(LayoutSettings.ACTIVITY_BAR_LOCATION);
 
-		const canShowLabels = position !== ActivityBarPosition.TOP && position !== ActivityBarPosition.BOTTOM; // use same style as activity bar in this case
+		const canShowLabels = position !== ActivityBarPosition.BOTTOM;
 		const showLabels = canShowLabels && this.configurationService.getValue('workbench.secondarySideBar.showLabels') !== false;
 
 		return { position, canShowLabels, showLabels };
@@ -297,7 +297,7 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 
 	protected getCompositeBarPosition(): CompositeBarPosition {
 		switch (this.configuration.position) {
-			case ActivityBarPosition.TOP: return CompositeBarPosition.TOP;
+			case ActivityBarPosition.TOP: return this.configuration.showLabels ? CompositeBarPosition.TITLE : CompositeBarPosition.TOP;
 			case ActivityBarPosition.BOTTOM: return CompositeBarPosition.BOTTOM;
 			case ActivityBarPosition.HIDDEN: return CompositeBarPosition.TITLE;
 			case ActivityBarPosition.DEFAULT: return CompositeBarPosition.TITLE;

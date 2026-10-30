@@ -189,6 +189,11 @@ export function defaultBrowserWindowOptions(accessor: ServicesAccessor, windowSt
 
 	if (isMacintosh) {
 		options.acceptFirstMouse = true; // enabled by default
+		options.vibrancy = 'under-window';
+		options.visualEffectState = 'active';
+		if (!overrides?.backgroundColor) {
+			options.backgroundColor = '#00000000';
+		}
 
 		if (windowSettings?.clickThroughInactive === false) {
 			options.acceptFirstMouse = false;

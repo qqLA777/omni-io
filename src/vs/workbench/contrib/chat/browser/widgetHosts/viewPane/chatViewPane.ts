@@ -276,11 +276,12 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 	}
 
 	private updateViewPaneClasses(fromEvent: boolean): void {
-		const activityBarLocationDefault = this.configurationService.getValue<string>(LayoutSettings.ACTIVITY_BAR_LOCATION) === 'default';
+		const { position, location } = this.getViewPositionAndLocation();
+		const activityBarLocation = this.configurationService.getValue<string>(LayoutSettings.ACTIVITY_BAR_LOCATION);
+		const showSecondaryLabels = this.configurationService.getValue<boolean>('workbench.secondarySideBar.showLabels') !== false;
+		const activityBarLocationDefault = activityBarLocation === 'default' || (activityBarLocation === 'top' && location === ViewContainerLocation.AuxiliaryBar && showSecondaryLabels);
 		this.viewPaneContainer?.classList.toggle('activity-bar-location-default', activityBarLocationDefault);
 		this.viewPaneContainer?.classList.toggle('activity-bar-location-other', !activityBarLocationDefault);
-
-		const { position, location } = this.getViewPositionAndLocation();
 
 		this.viewPaneContainer?.classList.toggle('chat-view-location-auxiliarybar', location === ViewContainerLocation.AuxiliaryBar);
 		this.viewPaneContainer?.classList.toggle('chat-view-location-sidebar', location === ViewContainerLocation.Sidebar);

@@ -10,14 +10,7 @@
   },
   "categories": ["Themes"],
   "contributes": {
-    "themes": [
-      {
-        "id": "Monokai",
-        "label": "%themeLabel%",
-        "uiTheme": "vs-dark",
-        "path": "./themes/monokai-color-theme.json"
-      }
-    ]
+    "themes": []
   },
   "repository": {
     "type": "git",

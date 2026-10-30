@@ -35,6 +35,7 @@ if [[ -z "${VSCODE_SKIP_PRELAUNCH}" ]]; then
 fi
 
 # Unit Tests
+unset ELECTRON_RUN_AS_NODE
 if [[ "$OSTYPE" == "darwin"* ]]; then
 	cd $ROOT ; ulimit -n 4096 ; \
 		ELECTRON_ENABLE_LOGGING=1 \

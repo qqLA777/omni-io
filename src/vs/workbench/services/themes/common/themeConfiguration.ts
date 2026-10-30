@@ -35,7 +35,7 @@ export const COLOR_THEME_CONFIGURATION_SETTINGS_TAG = 'colorThemeConfiguration';
 const colorThemeSettingSchema: IConfigurationPropertySchema = {
 	type: 'string',
 	markdownDescription: nls.localize({ key: 'colorTheme', comment: ['{0} will become a link to another setting.'] }, "Specifies the color theme used in the workbench when {0} is not enabled.", formatSettingAsLink(ThemeSettings.DETECT_COLOR_SCHEME)),
-	default: isWeb ? ThemeSettingDefaults.COLOR_THEME_LIGHT : ThemeSettingDefaults.COLOR_THEME_DARK,
+	default: ThemeSettingDefaults.COLOR_THEME_DARK,
 	tags: [COLOR_THEME_CONFIGURATION_SETTINGS_TAG],
 	enum: colorThemeSettingEnum,
 	enumDescriptions: colorThemeSettingEnumDescriptions,
@@ -55,7 +55,7 @@ const preferredDarkThemeSettingSchema: IConfigurationPropertySchema = {
 const preferredLightThemeSettingSchema: IConfigurationPropertySchema = {
 	type: 'string',
 	markdownDescription: nls.localize({ key: 'preferredLightColorTheme', comment: ['{0} will become a link to another setting.'] }, 'Specifies the color theme when system color mode is light and {0} is enabled.', formatSettingAsLink(ThemeSettings.DETECT_COLOR_SCHEME)),
-	default: ThemeSettingDefaults.COLOR_THEME_LIGHT,
+	default: ThemeSettingDefaults.COLOR_THEME_DARK,
 	tags: [COLOR_THEME_CONFIGURATION_SETTINGS_TAG],
 	enum: colorThemeSettingEnum,
 	enumDescriptions: colorThemeSettingEnumDescriptions,
@@ -65,7 +65,7 @@ const preferredLightThemeSettingSchema: IConfigurationPropertySchema = {
 const preferredHCDarkThemeSettingSchema: IConfigurationPropertySchema = {
 	type: 'string',
 	markdownDescription: nls.localize({ key: 'preferredHCDarkColorTheme', comment: ['{0} will become a link to another setting.'] }, 'Specifies the color theme when in high contrast dark mode and {0} is enabled.', formatSettingAsLink(ThemeSettings.DETECT_HC)),
-	default: ThemeSettingDefaults.COLOR_THEME_HC_DARK,
+	default: ThemeSettingDefaults.COLOR_THEME_DARK,
 	tags: [COLOR_THEME_CONFIGURATION_SETTINGS_TAG],
 	enum: colorThemeSettingEnum,
 	enumDescriptions: colorThemeSettingEnumDescriptions,
@@ -75,7 +75,7 @@ const preferredHCDarkThemeSettingSchema: IConfigurationPropertySchema = {
 const preferredHCLightThemeSettingSchema: IConfigurationPropertySchema = {
 	type: 'string',
 	markdownDescription: nls.localize({ key: 'preferredHCLightColorTheme', comment: ['{0} will become a link to another setting.'] }, 'Specifies the color theme when in high contrast light mode and {0} is enabled.', formatSettingAsLink(ThemeSettings.DETECT_HC)),
-	default: ThemeSettingDefaults.COLOR_THEME_HC_LIGHT,
+	default: ThemeSettingDefaults.COLOR_THEME_DARK,
 	tags: [COLOR_THEME_CONFIGURATION_SETTINGS_TAG],
 	enum: colorThemeSettingEnum,
 	enumDescriptions: colorThemeSettingEnumDescriptions,

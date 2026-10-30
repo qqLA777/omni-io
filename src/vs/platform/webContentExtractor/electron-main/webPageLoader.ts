@@ -27,6 +27,7 @@ import {
 import { createSingleCallFunction } from "../../../base/common/functional.js";
 import { Disposable, toDisposable } from "../../../base/common/lifecycle.js";
 import { Schemas } from "../../../base/common/network.js";
+// eslint-disable-next-line local/code-no-unexternalized-strings
 import { URI } from "../../../base/common/uri.js";
 import { generateUuid } from "../../../base/common/uuid.js";
 import { localize } from "../../../nls.js";

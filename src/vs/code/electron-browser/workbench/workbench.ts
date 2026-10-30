@@ -51,13 +51,14 @@ import { getPartsSplashColors, getPartsSplashLayoutMetrics } from './partsSplash
 		}
 
 		// minimal color configuration (works with or without persisted data)
-		let baseTheme;
-		let shellBackground;
-		let shellForeground;
+		const isMac = safeProcess.platform === 'darwin';
+		let baseTheme = 'vs-dark';
+		let shellBackground: string | undefined = isMac ? 'rgba(20, 20, 20, 0.93)' : '#141414';
+		let shellForeground: string | undefined = '#E6E6E6';
 		const splashColors = data ? getPartsSplashColors(data, window.document.hasFocus(), !!configuration.workspace) : undefined;
 		if (data) {
 			baseTheme = data.baseTheme;
-			shellBackground = splashColors?.background;
+			shellBackground = isMac ? 'rgba(20, 20, 20, 0.93)' : (splashColors?.background ?? '#141414');
 			shellForeground = data.colorInfo.foreground;
 		} else if (configuration.autoDetectHighContrast && configuration.colorScheme.highContrast) {
 			if (configuration.colorScheme.dark) {
@@ -70,15 +71,9 @@ import { getPartsSplashColors, getPartsSplashLayoutMetrics } from './partsSplash
 				shellForeground = '#000000';
 			}
 		} else if (configuration.autoDetectColorScheme) {
-			if (configuration.colorScheme.dark) {
-				baseTheme = 'vs-dark';
-				shellBackground = '#1E1E1E';
-				shellForeground = '#CCCCCC';
-			} else {
-				baseTheme = 'vs';
-				shellBackground = '#FFFFFF';
-				shellForeground = '#000000';
-			}
+			baseTheme = 'vs-dark';
+			shellBackground = isMac ? 'rgba(20, 20, 20, 0.93)' : '#141414';
+			shellForeground = '#E6E6E6';
 		}
 
 		const style = document.createElement('style');
@@ -91,8 +86,8 @@ import { getPartsSplashColors, getPartsSplashLayoutMetrics } from './partsSplash
 			preloadGlobals.webFrame.setZoomLevel(data.zoomLevel);
 		}
 
-		// restore parts if possible (we might not always store layout info)
-		if (data?.layoutInfo) {
+		// restore parts if possible (skip opaque splash rects on macOS so native under-window vibrancy never flashes solid)
+		if (data?.layoutInfo && !isMac) {
 			const { layoutInfo, colorInfo } = data;
 			const modernUI = layoutInfo.modernUI === true;
 			const { floatingMargin, floatingOuterMargin, floatingBorderWidth, floatingBorderRadius } = getPartsSplashLayoutMetrics(layoutInfo);

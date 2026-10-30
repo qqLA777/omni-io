@@ -82,7 +82,13 @@ MenuRegistry.appendMenuItem(MenuId.AuxiliaryBarTitle, {
 	},
 	group: 'navigation',
 	order: 2,
-	when: ContextKeyExpr.equals(`config.${LayoutSettings.ACTIVITY_BAR_LOCATION}`, ActivityBarPosition.DEFAULT)
+	when: ContextKeyExpr.or(
+		ContextKeyExpr.equals(`config.${LayoutSettings.ACTIVITY_BAR_LOCATION}`, ActivityBarPosition.DEFAULT),
+		ContextKeyExpr.and(
+			ContextKeyExpr.equals(`config.${LayoutSettings.ACTIVITY_BAR_LOCATION}`, ActivityBarPosition.TOP),
+			ContextKeyExpr.notEquals('config.workbench.secondarySideBar.showLabels', false)
+		)
+	)
 });
 
 registerAction2(class extends Action2 {

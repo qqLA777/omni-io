@@ -27,6 +27,13 @@
       }
     ],
     "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "omen-conversations",
+          "title": "Conversations",
+          "icon": "$(comment-discussion)"
+        }
+      ],
       "secondarySidebar": [
         {
           "id": "omen-docs",
@@ -41,6 +48,14 @@
       ]
     },
     "views": {
+      "omen-conversations": [
+        {
+          "type": "webview",
+          "id": "omen.conversationsView",
+          "name": "Conversations",
+          "icon": "$(comment-discussion)"
+        }
+      ],
       "explorer": [
         {
           "type": "webview",
@@ -68,6 +83,11 @@
       ]
     },
     "commands": [
+      {
+        "command": "omen.openAgentHub",
+        "title": "Open Antigravity Agent Mode Canvas",
+        "category": "Omen"
+      },
       {
         "command": "omen.manageModels",
         "title": "Manage & Download Local Models (Ollama)",
@@ -106,6 +126,9 @@
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "omen.openAgentHub"
+        },
         {
           "command": "omen.openAgentsView"
         },

@@ -10,6 +10,8 @@ import { OmenDocsViewProvider } from "./docsHubView.js";
 import { OmenClusterViewProvider } from "./clusterView.js";
 import { AgentDiffManager } from "./agentDiffManager.js";
 import { OmenAgentsViewProvider } from "./agentsView.js";
+import { AgentHubEditorProvider } from "./agentHubEditor.js";
+import { OmenConversationsSidebarProvider } from "./conversationsSidebar.js";
 
 export function activate(context: vscode.ExtensionContext): void {
 	const secretManager = new SecretManager(context);
@@ -26,9 +28,21 @@ export function activate(context: vscode.ExtensionContext): void {
 	provider.refresh();
 	void vscode.lm.selectChatModels({ vendor: "omen" });
 
-	// 2. Register Agents Diff Engine & Primary Sidebar (Explorer) Webview View
-	const diffManager = new AgentDiffManager(context, secretManager);
+	// 2. Register Right Secondary Side Bar Webview Views (Docs & RAG + Compute Cluster)
+	const docsProvider = new OmenDocsViewProvider(context);
+	const clusterProvider = new OmenClusterViewProvider(context);
+
+	// 3. Register Agents Diff Engine, Primary Sidebar Views (Agents + Antigravity Conversations)
+	const diffManager = new AgentDiffManager(
+		context,
+		secretManager,
+		clusterProvider,
+	);
 	const agentsProvider = new OmenAgentsViewProvider(context, diffManager);
+	const conversationsProvider = new OmenConversationsSidebarProvider(
+		context,
+		diffManager,
+	);
 
 	context.subscriptions.push(
 		vscode.workspace.registerTextDocumentContentProvider(
@@ -40,13 +54,11 @@ export function activate(context: vscode.ExtensionContext): void {
 			agentsProvider,
 			{ webviewOptions: { retainContextWhenHidden: true } },
 		),
-	);
-
-	// 3. Register Right Secondary Side Bar Webview Views (Docs & RAG + Compute Cluster)
-	const docsProvider = new OmenDocsViewProvider(context);
-	const clusterProvider = new OmenClusterViewProvider(context);
-
-	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(
+			OmenConversationsSidebarProvider.viewType,
+			conversationsProvider,
+			{ webviewOptions: { retainContextWhenHidden: true } },
+		),
 		vscode.window.registerWebviewViewProvider(
 			OmenDocsViewProvider.viewType,
 			docsProvider,
@@ -130,6 +142,9 @@ export function activate(context: vscode.ExtensionContext): void {
 		}),
 		vscode.commands.registerCommand("omen.openAgentsView", async () => {
 			await vscode.commands.executeCommand("omen.agentsView.focus");
+		}),
+		vscode.commands.registerCommand("omen.openAgentHub", () => {
+			AgentHubEditorProvider.createOrShow(context, diffManager, secretManager);
 		}),
 		vscode.commands.registerCommand("omen.newAgent", async () => {
 			const activeDoc = vscode.window.activeTextEditor?.document;

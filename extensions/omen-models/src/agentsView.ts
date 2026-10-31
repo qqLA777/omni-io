@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from "vscode";
+import * as crypto from "crypto";
 import { AgentDiffManager } from "./agentDiffManager.js";
 
 export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
@@ -33,6 +34,10 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 
 		webviewView.webview.onDidReceiveMessage(async (msg) => {
 			switch (msg.type) {
+				case "ready": {
+					this._postState();
+					break;
+				}
 				case "selectAgent": {
 					this._diffManager.selectSession(msg.sessionId);
 					const session = this._diffManager.sessions.find(
@@ -60,6 +65,10 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 					await this._diffManager.rejectSessionDiff(msg.sessionId);
 					break;
 				}
+				case "cancelAgent": {
+					this._diffManager.cancelSession(msg.sessionId);
+					break;
+				}
 				case "newAgentPrompt": {
 					const activeDoc = vscode.window.activeTextEditor?.document;
 					const fileName = activeDoc
@@ -82,17 +91,13 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 					break;
 				}
 				case "runStarterTask": {
-					if (msg.prompt) {
+					if (msg.prompt && typeof msg.prompt === "string") {
 						const activeDoc = vscode.window.activeTextEditor?.document;
 						void this._diffManager.executeRealAgent(
 							msg.prompt,
 							activeDoc?.uri,
 						);
 					}
-					break;
-				}
-				case "loadDemo": {
-					this._diffManager.loadDemoSession();
 					break;
 				}
 				case "setApiKey": {
@@ -109,7 +114,7 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 		if (!this._view) {
 			return;
 		}
-		this._view.webview.postMessage({
+		void this._view.webview.postMessage({
 			type: "state",
 			sessions: this._diffManager.sessions,
 			selectedSessionId: this._diffManager.selectedSession?.id,
@@ -117,10 +122,13 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 	}
 
 	private _getHtml(): string {
+		const nonce = crypto.randomBytes(16).toString("base64");
+
 		return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
 <style>
 	:root {
 		--bg: #161616;
@@ -315,10 +323,6 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 		background: #2E2E2E;
 		color: #FFF;
 	}
-	.btn-action:disabled {
-		opacity: 0.6;
-		cursor: wait;
-	}
 	.btn-accept {
 		color: #4ADE80;
 		border-color: rgba(39, 201, 63, 0.3);
@@ -374,13 +378,6 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 		color: var(--muted);
 		font-size: 12px;
 	}
-	.starter-demo {
-		border-color: rgba(56, 189, 248, 0.3);
-		color: #93C5FD;
-	}
-	.starter-demo:hover {
-		background: rgba(56, 189, 248, 0.1);
-	}
 	.activity-section {
 		margin-top: 4px;
 		padding-top: 8px;
@@ -423,7 +420,7 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 			<span>Agents</span>
 			<span id="agentCount" class="badge-count">0</span>
 		</div>
-		<button class="btn-new" onclick="newAgent()">+ New Agent</button>
+		<button id="newAgentBtn" class="btn-new">+ New Agent</button>
 	</div>
 
 	<div id="sessionList" class="session-list"></div>
@@ -431,20 +428,16 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 	<div id="starterBox" class="empty-box">
 		<div class="empty-title">Starter Agent Actions</div>
 		<div class="empty-desc">Click any task below to run a real agent on your active file:</div>
-		<div class="starter-task" onclick="runStarter('Refactor current component to improve modularity and clean structure')">
+		<div class="starter-task" data-action="runStarter" data-prompt="Refactor current component to improve modularity and clean structure">
 			<span>Refactor active file</span>
 			<span>→</span>
 		</div>
-		<div class="starter-task" onclick="runStarter('Add typed error handling, input validation, and guard clauses')">
-			<span>Add validation & guards</span>
+		<div class="starter-task" data-action="runStarter" data-prompt="Add typed error handling, input validation, and guard clauses">
+			<span>Add validation &amp; guards</span>
 			<span>→</span>
 		</div>
-		<div class="starter-task" onclick="runStarter('Add TypeScript type definitions, strict interfaces, and docstrings')">
-			<span>Type definitions & comments</span>
-			<span>→</span>
-		</div>
-		<div class="starter-task starter-demo" onclick="loadDemo()">
-			<span>Preview Demo Diff (Simulation)</span>
+		<div class="starter-task" data-action="runStarter" data-prompt="Add TypeScript type definitions, strict interfaces, and docstrings">
+			<span>Type definitions &amp; comments</span>
 			<span>→</span>
 		</div>
 	</div>
@@ -454,9 +447,19 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 		<div id="activitySteps"></div>
 	</div>
 
-<script>
+<script nonce="${nonce}">
 	const vscode = acquireVsCodeApi();
 	let state = { sessions: [], selectedSessionId: null };
+
+	function escapeHtml(str) {
+		if (!str) return '';
+		return String(str)
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;');
+	}
 
 	window.addEventListener('message', event => {
 		const msg = event.data;
@@ -467,41 +470,39 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 		}
 	});
 
-	function newAgent() {
+	document.getElementById('newAgentBtn').addEventListener('click', () => {
 		vscode.postMessage({ type: 'newAgentPrompt' });
-	}
+	});
 
-	function runStarter(prompt) {
-		vscode.postMessage({ type: 'runStarterTask', prompt });
-	}
+	document.addEventListener('click', e => {
+		const actionEl = e.target.closest('[data-action]');
+		if (!actionEl) return;
 
-	function loadDemo() {
-		vscode.postMessage({ type: 'loadDemo' });
-	}
+		const action = actionEl.getAttribute('data-action');
+		const sessionId = actionEl.getAttribute('data-session-id');
+		const prompt = actionEl.getAttribute('data-prompt');
 
-	function setApiKey(e) {
-		e.stopPropagation();
-		vscode.postMessage({ type: 'setApiKey' });
-	}
-
-	function selectSession(sessionId) {
-		vscode.postMessage({ type: 'selectAgent', sessionId });
-	}
-
-	function viewDiff(e, sessionId) {
-		e.stopPropagation();
-		vscode.postMessage({ type: 'viewDiff', sessionId });
-	}
-
-	function acceptDiff(e, sessionId) {
-		e.stopPropagation();
-		vscode.postMessage({ type: 'acceptDiff', sessionId });
-	}
-
-	function rejectDiff(e, sessionId) {
-		e.stopPropagation();
-		vscode.postMessage({ type: 'rejectDiff', sessionId });
-	}
+		if (action === 'runStarter' && prompt) {
+			vscode.postMessage({ type: 'runStarterTask', prompt });
+		} else if (action === 'selectSession' && sessionId) {
+			vscode.postMessage({ type: 'selectAgent', sessionId });
+		} else if (action === 'viewDiff' && sessionId) {
+			e.stopPropagation();
+			vscode.postMessage({ type: 'viewDiff', sessionId });
+		} else if (action === 'acceptDiff' && sessionId) {
+			e.stopPropagation();
+			vscode.postMessage({ type: 'acceptDiff', sessionId });
+		} else if (action === 'rejectDiff' && sessionId) {
+			e.stopPropagation();
+			vscode.postMessage({ type: 'rejectDiff', sessionId });
+		} else if (action === 'cancelAgent' && sessionId) {
+			e.stopPropagation();
+			vscode.postMessage({ type: 'cancelAgent', sessionId });
+		} else if (action === 'setApiKey') {
+			e.stopPropagation();
+			vscode.postMessage({ type: 'setApiKey' });
+		}
+	});
 
 	function render() {
 		const countEl = document.getElementById('agentCount');
@@ -510,7 +511,7 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 		const activityBox = document.getElementById('activityBox');
 		const activitySteps = document.getElementById('activitySteps');
 
-		countEl.textContent = state.sessions.length;
+		countEl.textContent = String(state.sessions.length);
 
 		if (state.sessions.length === 0) {
 			listEl.innerHTML = '';
@@ -522,12 +523,15 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 		starterEl.style.display = 'none';
 		listEl.innerHTML = state.sessions.map(s => {
 			const isActive = s.id === state.selectedSessionId ? 'active' : '';
-			const firstFile = s.filesChanged[0];
-			const fileName = firstFile ? firstFile.filePath.split('/').pop() : 'Files';
+			const firstFile = s.filesChanged && s.filesChanged[0];
+			const fileName = firstFile ? escapeHtml(firstFile.filePath.split('/').pop()) : 'Files';
 			const diffStat = firstFile && (firstFile.additions > 0 || firstFile.deletions > 0)
-				? \`+\${firstFile.additions} -\${firstFile.deletions}\`
+				? '+' + Number(firstFile.additions) + ' -' + Number(firstFile.deletions)
 				: '';
-			const statusClass = 'status-' + s.status;
+			const safeId = escapeHtml(s.id);
+			const safeTitle = escapeHtml(s.title);
+			const safeTime = escapeHtml(s.timestamp);
+			const statusClass = 'status-' + escapeHtml(s.status);
 			const statusLabel = s.status === 'running'
 				? 'Running...'
 				: s.status === 'review'
@@ -542,38 +546,38 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 			if (s.status === 'running') {
 				actionsHtml = \`
 					<div class="session-actions">
-						<button class="btn-action" disabled>⚡ Streaming Agent Diff...</button>
+						<button class="btn-action btn-reject" data-action="cancelAgent" data-session-id="\${safeId}">⏹ Stop Agent</button>
 					</div>
 				\`;
 			} else if (s.status === 'review') {
 				actionsHtml = \`
 					<div class="session-actions">
-						<button class="btn-action" onclick="viewDiff(event, '\${s.id}')">⎘ Diff</button>
-						<button class="btn-action btn-accept" onclick="acceptDiff(event, '\${s.id}')">✓ Accept</button>
-						<button class="btn-action btn-reject" onclick="rejectDiff(event, '\${s.id}')">✕ Reject</button>
+						<button class="btn-action" data-action="viewDiff" data-session-id="\${safeId}">⎘ Diff</button>
+						<button class="btn-action btn-accept" data-action="acceptDiff" data-session-id="\${safeId}">✓ Accept</button>
+						<button class="btn-action btn-reject" data-action="rejectDiff" data-session-id="\${safeId}">✕ Reject</button>
 					</div>
 				\`;
 			} else if (s.status === 'error') {
 				actionsHtml = \`
 					<div class="session-actions">
-						<button class="btn-action btn-reject" onclick="setApiKey(event)">Set API Key</button>
+						<button class="btn-action btn-reject" data-action="setApiKey">Set API Key</button>
 					</div>
 				\`;
 			} else {
 				actionsHtml = \`
 					<div class="session-actions">
-						<button class="btn-action" onclick="viewDiff(event, '\${s.id}')">⎘ View Diff</button>
+						<button class="btn-action" data-action="viewDiff" data-session-id="\${safeId}">⎘ View Diff</button>
 					</div>
 				\`;
 			}
 
 			return \`
-				<div class="session-card \${isActive}" onclick="selectSession('\${s.id}')">
+				<div class="session-card \${isActive}" data-action="selectSession" data-session-id="\${safeId}">
 					<div class="session-top">
 						<span class="status-pill \${statusClass}">\${statusLabel}</span>
-						<span class="session-time">\${s.timestamp}</span>
+						<span class="session-time">\${safeTime}</span>
 					</div>
-					<div class="session-title">\${s.title}</div>
+					<div class="session-title">\${safeTitle}</div>
 					\${firstFile ? \`
 						<div class="session-file-badge">
 							<span>📄 \${fileName}</span>
@@ -592,8 +596,8 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 				const stepClass = step.kind === 'error' ? 'step-error' : step.kind === 'success' ? 'step-success' : '';
 				return \`
 					<div class="activity-step \${stepClass}">
-						<span class="step-time">[\${step.time}]</span>
-						<span>\${step.text}</span>
+						<span class="step-time">[\${escapeHtml(step.time)}]</span>
+						<span>\${escapeHtml(step.text)}</span>
 					</div>
 				\`;
 			}).join('');
@@ -601,6 +605,8 @@ export class OmenAgentsViewProvider implements vscode.WebviewViewProvider {
 			activityBox.style.display = 'none';
 		}
 	}
+
+	vscode.postMessage({ type: 'ready' });
 </script>
 </body>
 </html>`;

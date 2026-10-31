@@ -31,7 +31,19 @@ export interface AgentSession {
 	filesChanged: AgentFileDiff[];
 	activityLog: AgentActivityStep[];
 	targetUri?: vscode.Uri;
+	targetUriString?: string;
+	modelId?: string;
 }
+
+export interface SelectableModelOption {
+	id: string;
+	name: string;
+	provider: "deepseek" | "openai" | "meta" | "ollama";
+	baseUrl: string;
+}
+
+const SESSIONS_STORAGE_KEY = "omen.agentSessions.v1";
+const SELECTED_MODEL_STORAGE_KEY = "omen.selectedModelId.v1";
 
 export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 	public static readonly scheme = "omen-agent";
@@ -40,14 +52,37 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 
 	private _sessions: AgentSession[] = [];
 	private _selectedSessionId?: string;
-	private readonly _onDidUpdateSessions = new vscode.EventEmitter<AgentSession[]>();
+	private _selectedModelId: string;
+	private readonly _activeCancellations = new Map<
+		string,
+		vscode.CancellationTokenSource
+	>();
+
+	private readonly _onDidUpdateSessions = new vscode.EventEmitter<
+		AgentSession[]
+	>();
 	public readonly onDidUpdateSessions = this._onDidUpdateSessions.event;
+
+	private readonly _onDidChangeSelectedModel =
+		new vscode.EventEmitter<SelectableModelOption>();
+	public readonly onDidChangeSelectedModel =
+		this._onDidChangeSelectedModel.event;
 
 	constructor(
 		private readonly _context: vscode.ExtensionContext,
 		private readonly _secretManager: SecretManager,
+		private readonly _clusterProvider?: {
+			getVerifiedWorkerNodes(): Array<{
+				ip: string;
+				name: string;
+				installedModels?: string[];
+			}>;
+		},
 	) {
-		void this._context;
+		this._selectedModelId =
+			this._context.globalState.get<string>(SELECTED_MODEL_STORAGE_KEY) ||
+			"deepseek-chat";
+		this._loadPersistedSessions();
 	}
 
 	public get sessions(): AgentSession[] {
@@ -58,9 +93,225 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 		return this._sessions.find((s) => s.id === this._selectedSessionId);
 	}
 
+	public get selectedModelId(): string {
+		return this._selectedModelId;
+	}
+
+	public async getAvailableModels(): Promise<SelectableModelOption[]> {
+		const options: SelectableModelOption[] = [];
+
+		const deepseekConfig = vscode.workspace.getConfiguration(
+			"omen.providers.deepseek",
+		);
+		if (deepseekConfig.get<boolean>("enabled", true)) {
+			const baseUrl = deepseekConfig
+				.get<string>("baseUrl", "https://api.deepseek.com/v1")
+				.replace(/\/+$/, "");
+			options.push(
+				{
+					id: "deepseek-chat",
+					name: "DeepSeek-V3 (Chat)",
+					provider: "deepseek",
+					baseUrl,
+				},
+				{
+					id: "deepseek-reasoner",
+					name: "DeepSeek-R1 (Reasoning)",
+					provider: "deepseek",
+					baseUrl,
+				},
+			);
+		}
+
+		const openaiConfig = vscode.workspace.getConfiguration(
+			"omen.providers.openai",
+		);
+		if (openaiConfig.get<boolean>("enabled", true)) {
+			const baseUrl = openaiConfig
+				.get<string>("baseUrl", "https://api.openai.com/v1")
+				.replace(/\/+$/, "");
+			options.push(
+				{
+					id: "gpt-4o",
+					name: "OpenAI GPT-4o",
+					provider: "openai",
+					baseUrl,
+				},
+				{
+					id: "gpt-4o-mini",
+					name: "OpenAI GPT-4o-mini",
+					provider: "openai",
+					baseUrl,
+				},
+			);
+		}
+
+		const metaConfig = vscode.workspace.getConfiguration("omen.providers.meta");
+		if (metaConfig.get<boolean>("enabled", true)) {
+			const baseUrl = metaConfig
+				.get<string>("baseUrl", "https://api.meta.com/v1")
+				.replace(/\/+$/, "");
+			options.push(
+				{
+					id: "muse-spark",
+					name: "Meta Muse Spark (Agentic)",
+					provider: "meta",
+					baseUrl,
+				},
+				{
+					id: "muse-wonder",
+					name: "Meta Muse Wonder (Reasoning)",
+					provider: "meta",
+					baseUrl,
+				},
+				{
+					id: "llama-3.3-70b-instruct",
+					name: "Meta Llama 3.3 70B Instruct",
+					provider: "meta",
+					baseUrl,
+				},
+			);
+		}
+
+		const ollamaConfig = vscode.workspace.getConfiguration(
+			"omen.providers.ollama",
+		);
+		if (ollamaConfig.get<boolean>("enabled", true)) {
+			try {
+				const baseUrl = OllamaManager.getBaseUrl();
+				const localModels = await OllamaManager.listInstalledModels();
+				for (const m of localModels) {
+					options.push({
+						id: `ollama/${m.name}`,
+						name: `Ollama: ${m.name}`,
+						provider: "ollama",
+						baseUrl: `${baseUrl}/v1`,
+					});
+				}
+			} catch {
+				// Ollama offline
+			}
+
+			// Add paired worker models (e.g. Nitro 5)
+			if (this._clusterProvider) {
+				const workers = this._clusterProvider.getVerifiedWorkerNodes();
+				for (const w of workers) {
+					if (Array.isArray(w.installedModels)) {
+						for (const modelName of w.installedModels) {
+							options.push({
+								id: `lan/${w.ip}/${modelName}`,
+								name: `LAN (${w.ip}): ${modelName}`,
+								provider: "ollama",
+								baseUrl: `http://${w.ip}:11434/v1`,
+							});
+						}
+					}
+				}
+			}
+		}
+
+		return options;
+	}
+
+	public async getSelectedModelOption(): Promise<SelectableModelOption> {
+		const models = await this.getAvailableModels();
+		return (
+			models.find((m) => m.id === this._selectedModelId) ||
+			models[0] || {
+				id: "deepseek-chat",
+				name: "DeepSeek-V3 (Chat)",
+				provider: "deepseek",
+				baseUrl: "https://api.deepseek.com/v1",
+			}
+		);
+	}
+
+	public async setSelectedModelId(modelId: string): Promise<void> {
+		this._selectedModelId = modelId;
+		await this._context.globalState.update(
+			SELECTED_MODEL_STORAGE_KEY,
+			modelId,
+		);
+		const selected = await this.getSelectedModelOption();
+		this._onDidChangeSelectedModel.fire(selected);
+	}
+
+	private _loadPersistedSessions(): void {
+		const raw = this._context.workspaceState.get<AgentSession[]>(
+			SESSIONS_STORAGE_KEY,
+		);
+		if (!Array.isArray(raw)) {
+			this._sessions = [];
+			return;
+		}
+		this._sessions = raw.map((s) => {
+			const wasRunning = s.status === "running";
+			const restoredUri = s.targetUriString
+				? vscode.Uri.parse(s.targetUriString)
+				: undefined;
+			const activityLog = Array.isArray(s.activityLog) ? [...s.activityLog] : [];
+			if (wasRunning) {
+				activityLog.push({
+					time: this._now(),
+					text: "Session interrupted by workbench reload.",
+					kind: "error",
+				});
+			}
+			return {
+				...s,
+				status: wasRunning ? "error" : s.status,
+				timestamp: wasRunning ? "Interrupted" : s.timestamp,
+				targetUri: restoredUri,
+				activityLog,
+			};
+		});
+		if (this._sessions.length > 0) {
+			this._selectedSessionId = this._sessions[0].id;
+		}
+	}
+
+	private _persistAndNotify(): void {
+		const serializable = this._sessions.map((s) => ({
+			id: s.id,
+			title: s.title,
+			prompt: s.prompt,
+			timestamp: s.timestamp,
+			status: s.status,
+			filesChanged: s.filesChanged,
+			activityLog: s.activityLog,
+			targetUriString: s.targetUri ? s.targetUri.toString() : s.targetUriString,
+			modelId: s.modelId,
+		}));
+		void this._context.workspaceState.update(
+			SESSIONS_STORAGE_KEY,
+			serializable,
+		);
+		this._onDidUpdateSessions.fire(this._sessions);
+	}
+
 	public selectSession(sessionId: string): void {
 		this._selectedSessionId = sessionId;
-		this._onDidUpdateSessions.fire(this._sessions);
+		this._persistAndNotify();
+	}
+
+	public cancelSession(sessionId: string): void {
+		const tokenSource = this._activeCancellations.get(sessionId);
+		if (tokenSource) {
+			tokenSource.cancel();
+			tokenSource.dispose();
+			this._activeCancellations.delete(sessionId);
+		}
+		const session = this._sessions.find((s) => s.id === sessionId);
+		if (session && session.status === "running") {
+			session.status = "rejected";
+			session.timestamp = "Cancelled";
+			session.activityLog.push({
+				time: this._now(),
+				text: "⏹ Agent execution cancelled by developer.",
+				kind: "info",
+			});
+			this._persistAndNotify();
+		}
 	}
 
 	provideTextDocumentContent(uri: vscode.Uri): string {
@@ -90,7 +341,7 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 		fileDiff?: AgentFileDiff,
 	): Promise<void> {
 		this._selectedSessionId = session.id;
-		this._onDidUpdateSessions.fire(this._sessions);
+		this._persistAndNotify();
 
 		const target = fileDiff ?? session.filesChanged[0];
 		if (!target) {
@@ -122,6 +373,9 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 
 		const fileDiff = session.filesChanged[0];
 		let targetUri = session.targetUri;
+		if (!targetUri && session.targetUriString) {
+			targetUri = vscode.Uri.parse(session.targetUriString);
+		}
 		if (!targetUri && vscode.workspace.workspaceFolders?.[0]) {
 			targetUri = vscode.Uri.joinPath(
 				vscode.workspace.workspaceFolders[0].uri,
@@ -141,12 +395,13 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 		}
 
 		session.status = "completed";
+		session.timestamp = "Completed";
 		session.activityLog.push({
 			time: this._now(),
 			text: `✓ Changes applied directly to ${fileDiff.filePath} and staged on disk.`,
 			kind: "success",
 		});
-		this._onDidUpdateSessions.fire(this._sessions);
+		this._persistAndNotify();
 		vscode.window.showInformationMessage(
 			`✓ Agent changes applied to ${path.basename(fileDiff.filePath)}. Git working tree updated.`,
 		);
@@ -158,12 +413,13 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 			return Promise.resolve();
 		}
 		session.status = "rejected";
+		session.timestamp = "Discarded";
 		session.activityLog.push({
 			time: this._now(),
 			text: "✕ Proposed changes discarded by developer.",
 			kind: "info",
 		});
-		this._onDidUpdateSessions.fire(this._sessions);
+		this._persistAndNotify();
 		vscode.window.showInformationMessage(
 			`Agent diff discarded: ${session.title}`,
 		);
@@ -173,7 +429,13 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 	public async executeRealAgent(
 		prompt: string,
 		specifiedUri?: vscode.Uri,
+		overrideModelId?: string,
 	): Promise<AgentSession | undefined> {
+		if (overrideModelId) {
+			await this.setSelectedModelId(overrideModelId);
+		}
+		const modelOption = await this.getSelectedModelOption();
+
 		const targetUri = await this._resolveTargetFile(prompt, specifiedUri);
 		if (!targetUri) {
 			vscode.window.showWarningMessage(
@@ -194,6 +456,9 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 		const id = `agent-${Date.now()}`;
 		const title = prompt.length > 55 ? prompt.substring(0, 52) + "..." : prompt;
 
+		const tokenSource = new vscode.CancellationTokenSource();
+		this._activeCancellations.set(id, tokenSource);
+
 		const session: AgentSession = {
 			id,
 			title,
@@ -201,6 +466,8 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 			timestamp: "Running",
 			status: "running",
 			targetUri,
+			targetUriString: targetUri.toString(),
+			modelId: modelOption.id,
 			filesChanged: [
 				{
 					filePath: relativePath,
@@ -213,35 +480,43 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 			],
 			activityLog: [
 				{ time: this._now(), text: `Agent initiated: "${prompt}"`, kind: "step" },
-				{ time: this._now(), text: `Target file resolved: ${relativePath} (${originalContent.split("\n").length} lines)`, kind: "tool" },
+				{
+					time: this._now(),
+					text: `Target file resolved: ${relativePath} (${originalContent.split("\n").length} lines)`,
+					kind: "tool",
+				},
+				{
+					time: this._now(),
+					text: `Selected model: ${modelOption.name} (${modelOption.id})`,
+					kind: "step",
+				},
 			],
 		};
 
 		this._sessions.unshift(session);
 		this._selectedSessionId = id;
-		this._onDidUpdateSessions.fire(this._sessions);
+		this._persistAndNotify();
 
 		try {
-			session.activityLog.push({
-				time: this._now(),
-				text: "Querying active Language Model...",
-				kind: "step",
-			});
-			this._onDidUpdateSessions.fire(this._sessions);
-
 			const modifiedCode = await this._queryLLM(
 				prompt,
 				relativePath,
 				originalContent,
+				modelOption,
+				tokenSource.token,
 				(statusText) => {
 					session.activityLog.push({
 						time: this._now(),
 						text: statusText,
 						kind: "info",
 					});
-					this._onDidUpdateSessions.fire(this._sessions);
+					this._persistAndNotify();
 				},
 			);
+
+			if (tokenSource.token.isCancellationRequested) {
+				return session;
+			}
 
 			const metrics = this._computeDiffMetrics(originalContent, modifiedCode);
 			session.filesChanged[0].modifiedContent = modifiedCode;
@@ -260,10 +535,13 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 					`${AgentDiffManager.scheme}://omen-diff/modified/${session.id}/${relativePath}`,
 				),
 			);
-			this._onDidUpdateSessions.fire(this._sessions);
+			this._persistAndNotify();
 			await this.showDiff(session);
 			return session;
 		} catch (err: unknown) {
+			if (tokenSource.token.isCancellationRequested) {
+				return session;
+			}
 			const errMsg = err instanceof Error ? err.message : String(err);
 			session.status = "error";
 			session.timestamp = "Error";
@@ -272,8 +550,14 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 				text: `Agent execution failed: ${errMsg}`,
 				kind: "error",
 			});
-			this._onDidUpdateSessions.fire(this._sessions);
+			this._persistAndNotify();
 			return session;
+		} finally {
+			const stored = this._activeCancellations.get(id);
+			if (stored) {
+				stored.dispose();
+				this._activeCancellations.delete(id);
+			}
 		}
 	}
 
@@ -290,7 +574,6 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 			return activeEditor.document.uri;
 		}
 
-		// Look for file path mentioned in prompt
 		const fileMatch = prompt.match(
 			/(?:[a-zA-Z0-9_\-\./]+)\.(?:tsx?|jsx?|py|json|css|html|md|vue|svelte)/i,
 		);
@@ -308,7 +591,6 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 			}
 		}
 
-		// Prompt user with workspace file quick-pick
 		if (vscode.workspace.workspaceFolders?.[0]) {
 			const files = await vscode.workspace.findFiles(
 				"**/*.{ts,tsx,js,jsx,py,json,css,html}",
@@ -337,60 +619,96 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 		prompt: string,
 		relativePath: string,
 		originalContent: string,
+		modelOption: SelectableModelOption,
+		token: vscode.CancellationToken,
 		onProgress: (statusText: string) => void,
 	): Promise<string> {
-		// 1. Attempt official VS Code Language Model API
+		// 1. Attempt official VS Code Language Model API matching the selected model ID
 		try {
-			const models = await vscode.lm.selectChatModels({ vendor: "omen" });
-			if (models && models.length > 0) {
-				const model = models[0];
-				onProgress(`Connected to model: ${model.name}`);
+			const models = await vscode.lm.selectChatModels({
+				vendor: "omen",
+				id: modelOption.id,
+			});
+			const matchedModel = models?.[0];
+			if (matchedModel) {
+				onProgress(`Dispatching via vscode.lm to ${matchedModel.name}...`);
 				const messages = [
 					vscode.LanguageModelChatMessage.User(
 						`You are an expert autonomous software engineer.\nInstruction: ${prompt}\n\nTarget File: ${relativePath}\nOriginal Content:\n\`\`\`\n${originalContent}\n\`\`\`\n\nCRITICAL: Return ONLY the raw modified file content without markdown code fences or explanatory text.`,
 					),
 				];
-				const tokenSource = new vscode.CancellationTokenSource();
-				const response = await model.sendRequest(
-					messages,
-					{},
-					tokenSource.token,
-				);
+				const response = await matchedModel.sendRequest(messages, {}, token);
 				let fullText = "";
 				for await (const chunk of response.text) {
+					if (token.isCancellationRequested) {
+						throw new Error("Cancelled");
+					}
 					fullText += chunk;
 				}
 				if (fullText.trim()) {
 					return this._cleanModelOutput(fullText);
 				}
 			}
-		} catch {
-			// Fallback to direct provider integration
+		} catch (err: unknown) {
+			if (token.isCancellationRequested) {
+				throw err;
+			}
+			// Fall back to direct provider HTTP call for the selected model
 		}
 
-		// 2. Direct Provider Fallback via SecretManager (Meta / DeepSeek / OpenAI)
-		const activeKey = await this._secretManager.getActiveKey();
-		if (activeKey) {
-			onProgress(`Connecting to ${activeKey.provider.toUpperCase()} API endpoint...`);
-			let endpoint = "https://api.deepseek.com/v1/chat/completions";
-			let modelName = "deepseek-chat";
+		// 2. Direct Provider Call for the chosen modelOption
+		let apiKey: string | undefined;
+		if (modelOption.provider === "deepseek") {
+			apiKey = await this._secretManager.getDeepSeekApiKey();
+		} else if (modelOption.provider === "openai") {
+			apiKey = await this._secretManager.getOpenAIApiKey();
+		} else if (modelOption.provider === "meta") {
+			apiKey = await this._secretManager.getMetaApiKey();
+		}
 
-			if (activeKey.provider === "openai") {
-				endpoint = "https://api.openai.com/v1/chat/completions";
-				modelName = "gpt-4o";
-			} else if (activeKey.provider === "meta") {
-				endpoint = "https://api.meta.com/v1/chat/completions";
-				modelName = "muse-spark";
+		if (modelOption.provider !== "ollama" && !apiKey) {
+			const setKeyAction = `Set ${modelOption.provider.toUpperCase()} API Key`;
+			void vscode.window
+				.showErrorMessage(
+					`${modelOption.name} requires a configured ${modelOption.provider.toUpperCase()} API Key.`,
+					setKeyAction,
+				)
+				.then((sel) => {
+					if (sel === setKeyAction) {
+						void this._secretManager.promptForApiKey();
+					}
+				});
+
+			throw new Error(
+				`Missing API key for ${modelOption.name} (${modelOption.provider}). Configure it via 'Omen: Set API Key'.`,
+			);
+		}
+
+		onProgress(`Connecting to ${modelOption.name} (${modelOption.baseUrl})...`);
+
+		const targetModelName = modelOption.id.startsWith("ollama/")
+			? modelOption.id.replace("ollama/", "")
+			: modelOption.id;
+
+		const abortController = new AbortController();
+		const cancelSub = token.onCancellationRequested(() =>
+			abortController.abort(),
+		);
+
+		try {
+			const headers: Record<string, string> = {
+				"Content-Type": "application/json",
+			};
+			if (apiKey) {
+				headers["Authorization"] = `Bearer ${apiKey}`;
 			}
 
-			const resp = await fetch(endpoint, {
+			const resp = await fetch(`${modelOption.baseUrl}/chat/completions`, {
 				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Authorization: `Bearer ${activeKey.key}`,
-				},
+				headers,
+				signal: abortController.signal,
 				body: JSON.stringify({
-					model: modelName,
+					model: targetModelName,
 					messages: [
 						{
 							role: "system",
@@ -408,152 +726,22 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 
 			if (!resp.ok) {
 				const errText = await resp.text();
-				throw new Error(`${activeKey.provider.toUpperCase()} API returned error HTTP ${resp.status}: ${errText}`);
+				throw new Error(
+					`${modelOption.name} returned HTTP ${resp.status}: ${errText}`,
+				);
 			}
 
-			const data = (await resp.json()) as { choices?: Array<{ message?: { content?: string } }> };
+			const data = (await resp.json()) as {
+				choices?: Array<{ message?: { content?: string } }>;
+			};
 			const output = data.choices?.[0]?.message?.content;
-			if (output && output.trim()) {
-				return this._cleanModelOutput(output);
+			if (!output || !output.trim()) {
+				throw new Error(`Empty response received from ${modelOption.name}.`);
 			}
+			return this._cleanModelOutput(output);
+		} finally {
+			cancelSub.dispose();
 		}
-
-		// 3. Fallback: Local Ollama check
-		try {
-			const ollamaBaseUrl = OllamaManager.getBaseUrl();
-			const localModels = await OllamaManager.listInstalledModels();
-			if (localModels.length > 0) {
-				const localModel = localModels[0].name;
-				onProgress(`Streaming from local Ollama model (${localModel})...`);
-				const resp = await fetch(`${ollamaBaseUrl}/v1/chat/completions`, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						model: localModel,
-						messages: [
-							{
-								role: "system",
-								content:
-									"You are an expert software engineer. Return ONLY modified code without backticks.",
-							},
-							{
-								role: "user",
-								content: `Instruction: ${prompt}\n\nFile: ${relativePath}\n\`\`\`\n${originalContent}\n\`\`\``,
-							},
-						],
-					}),
-				});
-				if (resp.ok) {
-					const data = (await resp.json()) as { choices?: Array<{ message?: { content?: string } }> };
-					const output = data.choices?.[0]?.message?.content;
-					if (output && output.trim()) {
-						return this._cleanModelOutput(output);
-					}
-				}
-			}
-		} catch {
-			// Ollama not reachable
-		}
-
-		// 4. No configured provider found
-		const setKeyAction = "Set API Key";
-		void vscode.window
-			.showErrorMessage(
-				"No AI model available. Please configure an API Key (DeepSeek / OpenAI / Meta) or start Ollama.",
-				setKeyAction,
-			)
-			.then((sel) => {
-				if (sel === setKeyAction) {
-					void this._secretManager.promptForApiKey();
-				}
-			});
-
-		throw new Error(
-			"API key not configured and local Ollama is offline. Configure an API key via 'Omen: Set API Key' in the Command Palette.",
-		);
-	}
-
-	public loadDemoSession(): void {
-		const sampleSidebarOriginal = `export function AdminSidebar() {
-  return (
-    <aside className="w-64 bg-gray-900 text-white p-4">
-      <h2 className="text-xl font-bold">Admin Panel</h2>
-      <nav className="mt-4 flex flex-col gap-2">
-        <a href="/admin">Dashboard</a>
-        <a href="/admin/staff">Staff</a>
-        <a href="/admin/settings">Settings</a>
-      </nav>
-    </aside>
-  );
-}`;
-
-		const sampleSidebarModified = `import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-
-export function AdminSidebar() {
-  const pathname = usePathname();
-  const navItems = [
-    { href: '/admin', label: 'Dashboard', icon: 'LayoutDashboard' },
-    { href: '/admin/staff', label: 'Staff Roster', icon: 'Users' },
-    { href: '/admin/services', label: 'Services', icon: 'Scissors' },
-    { href: '/admin/settings', label: 'Preferences', icon: 'Settings' },
-  ];
-
-  return (
-    <aside className="w-64 bg-[#161616] border-r border-[#222222] text-[#E6E6E6] flex flex-col h-full">
-      <div className="p-4 border-b border-[#222222]">
-        <h2 className="text-sm font-semibold tracking-wide">Ariel Barbers Admin</h2>
-      </div>
-      <nav className="p-3 flex flex-col gap-1 flex-1">
-        {navItems.map((item) => {
-          const isActive = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={\`px-3 py-2 rounded-md text-xs font-medium transition-colors \${
-                isActive
-                  ? 'bg-[#272727] text-white'
-                  : 'text-[#858585] hover:text-[#E6E6E6] hover:bg-[#1C1C1C]'
-              }\`}
-            >
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-    </aside>
-  );
-}`;
-
-		const demoSession: AgentSession = {
-			id: "agent-demo-sidebar",
-			title: "Refactor admin-sidebar.tsx to match design system",
-			prompt: "Refactor components/admin/admin-sidebar.tsx with active route highlighting, matching the #141414 / #161616 monochromatic theme and Next.js navigation.",
-			timestamp: "Demo",
-			status: "review",
-			filesChanged: [
-				{
-					filePath: "components/admin/admin-sidebar.tsx",
-					originalContent: sampleSidebarOriginal,
-					modifiedContent: sampleSidebarModified,
-					status: "modified",
-					additions: 32,
-					deletions: 8,
-				},
-			],
-			activityLog: [
-				{ time: "00:01", text: "Target file resolved: components/admin/admin-sidebar.tsx", kind: "tool" },
-				{ time: "00:02", text: "Connected to Language Model (deepseek-chat)", kind: "step" },
-				{ time: "00:03", text: "Generated typed navigation schema and theme tokens", kind: "step" },
-				{ time: "00:04", text: "Diff ready (+32 -8 lines). Awaiting developer review.", kind: "diff" },
-			],
-		};
-
-		this._sessions = [demoSession];
-		this._selectedSessionId = demoSession.id;
-		this._onDidUpdateSessions.fire(this._sessions);
-		void this.showDiff(demoSession);
 	}
 
 	private _cleanModelOutput(raw: string): string {

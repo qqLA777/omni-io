@@ -112,6 +112,11 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 	}
 
 	private registerSetupAgents(context: ChatEntitlementContext, controller: Lazy<ChatSetupController>): void {
+		void context.update({ installed: true, disabled: false, untrusted: false, disabledInWorkspace: false });
+		void context.update({ completed: true });
+		if (defaultChat.chatExtensionId === 'omen.omen-models') {
+			return;
+		}
 		const defaultAgentDisposables = markAsSingleton(new MutableDisposable()); // prevents flicker on window reload
 		const vscodeAgentDisposables = markAsSingleton(new MutableDisposable());
 
@@ -573,8 +578,10 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 		registerAction2(ChatSetupTriggerAction);
 		registerAction2(ChatSetupTriggerForceSignInDialogAction);
 		registerAction2(ChatSetupFromAccountsAction);
-		registerAction2(ChatSetupSignInTitleBarAction);
-		registerAction2(ToggleSignInTitleBarAction);
+		if (defaultChat.chatExtensionId !== 'omen.omen-models') {
+			registerAction2(ChatSetupSignInTitleBarAction);
+			registerAction2(ToggleSignInTitleBarAction);
+		}
 		registerAction2(ChatSetupTriggerAnonymousWithoutDialogAction);
 		registerAction2(ChatSetupTriggerSupportAnonymousAction);
 		registerAction2(UpgradePlanAction);
@@ -667,6 +674,9 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 	}
 
 	private registerSignInTitleBarEntry(actionViewItemService: IActionViewItemService): void {
+		if (defaultChat.chatExtensionId === 'omen.omen-models') {
+			return;
+		}
 		this._register(actionViewItemService.register(
 			MenuId.TitleBarAdjacentCenter,
 			SIGN_IN_TITLE_BAR_ACTION_ID,
@@ -679,6 +689,11 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 	}
 
 	private async checkExtensionInstallation(context: ChatEntitlementContext): Promise<void> {
+		if (defaultChat.chatExtensionId === 'omen.omen-models') {
+			await context.update({ installed: true, disabled: false, untrusted: false, disabledInWorkspace: false });
+			await context.update({ completed: true });
+			return;
+		}
 
 		// When developing extensions, await registration and then check
 		if (this.environmentService.isExtensionDevelopment) {

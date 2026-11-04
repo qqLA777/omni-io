@@ -153,7 +153,7 @@ export class ModernUIContribution extends Disposable implements IWorkbenchContri
 	}
 
 	private isEnabled(): boolean {
-		return this.configurationService.getValue<boolean>(LayoutSettings.MODERN_UI) === true;
+		return false;
 	}
 
 	private useUppercaseViewHeaders(): boolean {

@@ -261,17 +261,12 @@ registerSingleton(IAgentTitleBarStatusService, AgentTitleBarStatusService, Insta
 registerWorkbenchContribution2(AgentTitleBarStatusRendering.ID, AgentTitleBarStatusRendering, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentSessionReadyContribution.ID, AgentSessionReadyContribution, WorkbenchPhase.AfterRestored);
 
-// Register Agent Status as a menu item in the command center (alongside the search box, not replacing it)
+// Register Agent Status as a menu item in the command center (disabled in Omen so title bar stays minimalist)
 MenuRegistry.appendMenuItem(MenuId.CommandCenter, {
 	submenu: MenuId.AgentsTitleBarControlMenu,
 	title: localize('agentsControl', "Agents"),
 	icon: Codicon.chatSparkle,
-	when: ContextKeyExpr.and(
-		ChatContextKeys.enabled,
-		ContextKeyExpr.notEquals(`config.${ChatConfiguration.AgentStatusEnabled}`, 'hidden'),
-		ContextKeyExpr.notEquals(`config.${ChatConfiguration.AgentStatusEnabled}`, false),
-		InEditorZenModeContext.negate()
-	),
+	when: ContextKeyExpr.false(),
 	order: 10002 // to the right of the chat button
 });
 

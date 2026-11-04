@@ -2,21 +2,30 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+/* eslint-disable local/code-no-unexternalized-strings */
 import * as vscode from "vscode";
 import * as crypto from "crypto";
 import { AgentDiffManager } from "./agentDiffManager.js";
+import { SecretManager } from "./secretManager.js";
 
-export class OmenConversationsSidebarProvider implements vscode.WebviewViewProvider {
+export class OmenConversationsSidebarProvider
+	implements vscode.WebviewViewProvider
+{
 	public static readonly viewType = "omen.conversationsView";
 	private _view?: vscode.WebviewView;
 
 	constructor(
 		private readonly _context: vscode.ExtensionContext,
 		private readonly _diffManager: AgentDiffManager,
+		private readonly _secretManager?: SecretManager,
 	) {
 		void this._context;
+		void this._secretManager;
 		this._diffManager.onDidUpdateSessions(() => {
-			this._postState();
+			void this._postState();
+		});
+		this._diffManager.onDidChangeSelectedModel(() => {
+			void this._postState();
 		});
 	}
 
@@ -32,55 +41,63 @@ export class OmenConversationsSidebarProvider implements vscode.WebviewViewProvi
 		webviewView.webview.onDidReceiveMessage(async (msg) => {
 			switch (msg.type) {
 				case "ready": {
-					this._postState();
+					await this._postState();
 					break;
 				}
 				case "newConversation": {
+					this._diffManager.selectSession("");
 					await vscode.commands.executeCommand("omen.openAgentHub");
+					void this._postState();
 					break;
 				}
 				case "selectConversation": {
-					const session = this._diffManager.sessions.find(
-						(s) => s.id === msg.sessionId,
-					);
-					if (session) {
-						this._diffManager.selectSession(session.id);
-						if (session.status !== "running") {
-							await this._diffManager.showDiff(session);
-						}
+					if (typeof msg.sessionId === "string") {
+						this._diffManager.selectSession(msg.sessionId);
+						await vscode.commands.executeCommand("omen.openAgentHub");
+						void this._postState();
 					}
 					break;
 				}
-				case "openAutomations": {
-					vscode.window.showInformationMessage(
-						"Automations portal (No active cron jobs).",
-					);
+				case "deleteConversation": {
+					if (typeof msg.sessionId === "string") {
+						this._diffManager.deleteSession(msg.sessionId);
+					}
 					break;
 				}
-				case "openCustomizations": {
-					vscode.window.showInformationMessage(
-						"Customizations portal (Open extensions/settings).",
-					);
+				case "openCodebase": {
+					await vscode.commands.executeCommand("workbench.view.explorer");
+					break;
+				}
+				case "openClusterHub": {
+					await vscode.commands.executeCommand("omen.openClusterHub");
+					break;
+				}
+				case "openDocsHub": {
+					await vscode.commands.executeCommand("omen.openDocsHub");
 					break;
 				}
 				case "openSettings": {
-					await vscode.commands.executeCommand("workbench.action.openSettings");
+					await vscode.commands.executeCommand("omen.openSettingsHub");
 					break;
 				}
 			}
 		});
 
-		this._postState();
+		void this._postState();
 	}
 
-	private _postState(): void {
+	private async _postState(): Promise<void> {
 		if (!this._view) {
 			return;
 		}
+		const workspaceName =
+			vscode.workspace.workspaceFolders?.[0]?.name || "omen";
+
 		void this._view.webview.postMessage({
 			type: "state",
 			sessions: this._diffManager.sessions,
-			selectedSessionId: this._diffManager.selectedSession?.id,
+			selectedSessionId: this._diffManager.selectedSession?.id || null,
+			workspaceName,
 		});
 	}
 
@@ -94,155 +111,252 @@ export class OmenConversationsSidebarProvider implements vscode.WebviewViewProvi
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
 <style>
 	:root {
-		--bg-sidebar: #1a1a1a;
-		--btn-card: #222222;
-		--btn-hover: #2a2a2a;
-		--border-subtle: #2b2b2b;
-		--fg-primary: #EDEDED;
-		--fg-muted: #8E8E8E;
-		--font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+		/* Backgrounds (3 levels only) */
+		--bg-app:      #0f0f10;
+		--bg-sidebar:  #141415;
+		--bg-elevated: #1a1a1c;
+
+		/* Borders: nearly invisible */
+		--border:      rgba(255,255,255,0.06);
+		--border-focus: rgba(255,255,255,0.16);
+
+		/* Text */
+		--text-primary:   rgba(255,255,255,0.92);
+		--text-secondary: rgba(255,255,255,0.55);
+		--text-tertiary:  rgba(255,255,255,0.35);
+
+		/* One accent, used sparingly */
+		--accent: #4f8cff;
+
+		/* Shape and type */
+		--radius-sm: 6px;
+		--radius-md: 8px;
+		--radius-lg: 12px;
+		--font-ui: Inter, -apple-system, sans-serif;
+		--font-code: "JetBrains Mono", "SF Mono", monospace;
 	}
-	* { box-sizing: border-box; }
-	body {
+	* {
+		box-sizing: border-box;
+	}
+	html, body {
 		margin: 0;
-		padding: 10px 10px 4px 10px;
-		font-family: var(--font);
-		font-size: 11.5px;
-		color: var(--fg-primary);
+		padding: 0;
+		width: 100%;
+		height: 100%;
+		font-family: var(--font-ui);
+		font-size: 13px;
+		color: var(--text-primary);
 		background: var(--bg-sidebar);
 		display: flex;
 		flex-direction: column;
-		height: 100vh;
+		overflow: hidden;
 		user-select: none;
+		-webkit-font-smoothing: antialiased;
 	}
-	.btn-new-conv {
-		background: var(--btn-card);
-		color: var(--fg-primary);
-		border: 1px solid var(--border-subtle);
-		border-radius: 6px;
-		padding: 7px 10px;
-		font-size: 12px;
+
+	/* Top New Chat Button (30px height, modern spring transition) */
+	.top-cta-wrap {
+		padding: 8px 8px 4px 8px;
+		flex-shrink: 0;
+	}
+	.btn-new-chat {
+		width: 100%;
+		height: 30px;
+		background: var(--bg-elevated);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		color: var(--text-primary);
+		padding: 0 10px;
+		font-family: var(--font-ui);
+		font-size: 13px;
 		font-weight: 500;
 		cursor: pointer;
 		display: flex;
 		align-items: center;
-		gap: 6px;
-		transition: all 0.15s ease;
-	}
-	.btn-new-conv:hover {
-		background: var(--btn-hover);
-		color: #FFF;
-	}
-	.nav-link {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 6px 8px;
-		border-radius: 4px;
-		color: #BDBDBD;
-		cursor: pointer;
-		margin-top: 4px;
-		transition: background 0.12s ease;
-	}
-	.nav-link:hover {
-		background: #242424;
-		color: #FFF;
-	}
-	.section-divider {
-		margin-top: 14px;
-		margin-bottom: 6px;
-		padding: 0 4px;
-		font-size: 10.5px;
-		font-weight: 600;
-		color: var(--fg-muted);
-		display: flex;
 		justify-content: space-between;
-		align-items: center;
+		transition: background 160ms cubic-bezier(0.22, 1, 0.36, 1),
+			border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+			transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
 	}
-	.thread-list {
+	.btn-new-chat:hover {
+		border-color: var(--border-focus);
+	}
+	.btn-new-chat:active {
+		transform: scale(0.985);
+	}
+	.new-shortcut {
+		font-size: 11px;
+		color: var(--text-tertiary);
+		font-weight: 400;
+	}
+
+	/* Primary Navigation Rows (30px rows, zero icons) */
+	.nav-section {
+		padding: 2px 8px 6px 8px;
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: 1px;
+		border-bottom: 1px solid var(--border);
+		flex-shrink: 0;
+	}
+	.sidebar-row {
+		height: 30px;
+		padding: 0 10px;
+		border-radius: var(--radius-sm);
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		color: var(--text-secondary);
+		font-size: 13px;
+		cursor: pointer;
+		position: relative;
+		transition: background 150ms cubic-bezier(0.22, 1, 0.36, 1),
+			color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+			transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+	}
+	.sidebar-row:hover {
+		background: var(--bg-elevated);
+		color: var(--text-primary);
+	}
+	.sidebar-row.selected {
+		background: var(--bg-elevated);
+		color: var(--text-primary);
+	}
+	.sidebar-row.selected::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		top: 7px;
+		bottom: 7px;
+		width: 2px;
+		border-radius: 2px;
+		background: var(--accent);
+	}
+
+	/* Scrollable Date-Grouped Thread List */
+	.threads-scroll {
 		flex: 1;
 		overflow-y: auto;
-	}
-	.thread-item {
+		padding: 8px 8px 12px 8px;
 		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 6px 8px;
+		flex-direction: column;
+		gap: 12px;
+	}
+	.threads-scroll::-webkit-scrollbar {
+		width: 4px;
+	}
+	.threads-scroll::-webkit-scrollbar-thumb {
+		background: rgba(255, 255, 255, 0.08);
 		border-radius: 4px;
-		cursor: pointer;
-		transition: background 0.12s ease;
 	}
-	.thread-item:hover, .thread-item.active {
-		background: #242424;
+
+	.date-group {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		animation: fadeIn 180ms cubic-bezier(0.22, 1, 0.36, 1);
 	}
-	.thread-title {
-		font-size: 11.5px;
-		color: #CCCCCC;
+	.date-header {
+		height: 24px;
+		padding: 0 10px;
+		display: flex;
+		align-items: center;
+		font-size: 11px;
+		font-weight: 500;
+		color: var(--text-tertiary);
+		letter-spacing: 0.01em;
+	}
+	.row-title {
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		max-width: 140px;
+		flex: 1;
 	}
-	.thread-item:hover .thread-title, .thread-item.active .thread-title {
-		color: #FFF;
-	}
-	.thread-time {
-		font-size: 10px;
-		color: #707070;
+	.row-meta {
+		font-size: 11px;
+		color: var(--text-tertiary);
 		flex-shrink: 0;
 	}
-	.empty-hint {
-		color: var(--fg-muted);
-		font-size: 11px;
-		text-align: center;
-		padding: 24px 8px;
-		line-height: 1.4;
-	}
-	.sidebar-footer {
-		margin-top: auto;
-		padding: 8px 4px 12px 4px;
-		border-top: 1px solid var(--border-subtle);
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		color: #8E8E8E;
+	.btn-delete {
+		display: none;
+		background: transparent;
+		border: none;
+		color: var(--text-tertiary);
+		font-family: var(--font-ui);
+		font-size: 12px;
 		cursor: pointer;
+		padding: 0 4px;
+		line-height: 1;
+		border-radius: 4px;
+		transition: color 120ms ease;
 	}
-	.sidebar-footer:hover {
-		color: #FFF;
+	.btn-delete:hover {
+		color: var(--text-primary);
+	}
+	.sidebar-row:hover .btn-delete {
+		display: inline-block;
+	}
+	.sidebar-row:hover .row-meta {
+		display: none;
+	}
+
+	.empty-state {
+		padding: 8px 10px;
+		font-size: 12px;
+		color: var(--text-tertiary);
+	}
+
+	/* Bottom Settings Footer (30px row, zero icons) */
+	.sidebar-footer {
+		padding: 6px 8px;
+		border-top: 1px solid var(--border);
+		flex-shrink: 0;
+	}
+
+	@keyframes fadeIn {
+		from { opacity: 0; transform: translateY(2px); }
+		to { opacity: 1; transform: translateY(0); }
 	}
 </style>
 </head>
 <body>
-	<button class="btn-new-conv" data-action="newConversation">+ New Conversation</button>
-
-	<div class="nav-link" data-action="openAutomations">
-		<span>⏱</span>
-		<span>Automations</span>
-	</div>
-	<div class="nav-link" data-action="openCustomizations">
-		<span>🎛</span>
-		<span>Customizations</span>
+	<div class="top-cta-wrap">
+		<button class="btn-new-chat" data-action="newConversation">
+			<span>New Chat</span>
+			<span class="new-shortcut">Cmd+N</span>
+		</button>
 	</div>
 
-	<div class="section-divider">
-		<span>Conversations</span>
-		<span id="convCount">0</span>
+	<div class="nav-section">
+		<div class="sidebar-row" data-action="openDocsHub">
+			<span class="row-title">Docs &amp; RAG</span>
+		</div>
+		<div class="sidebar-row" data-action="openClusterHub">
+			<span class="row-title">LAN Compute</span>
+		</div>
+		<div class="sidebar-row" data-action="openCodebase">
+			<span class="row-title">Codebase</span>
+		</div>
 	</div>
 
-	<div id="threadList" class="thread-list"></div>
+	<div id="threadsContainer" class="threads-scroll"></div>
 
-	<div class="sidebar-footer" data-action="openSettings">
-		<span>⚙</span>
-		<span>Settings</span>
+	<div class="sidebar-footer">
+		<div class="sidebar-row" data-action="openSettings">
+			<span class="row-title">Settings</span>
+			<span class="row-meta">API Keys</span>
+		</div>
 	</div>
 
 <script nonce="${nonce}">
 	const vscode = acquireVsCodeApi();
-	let state = { sessions: [], selectedSessionId: null };
+
+	let state = {
+		sessions: [],
+		selectedSessionId: null,
+		workspaceName: 'omen',
+	};
 
 	function escapeHtml(str) {
 		if (!str) return '';
@@ -254,11 +368,38 @@ export class OmenConversationsSidebarProvider implements vscode.WebviewViewProvi
 			.replace(/'/g, '&#39;');
 	}
 
+	function getDateBucket(session) {
+		const ts = session.createdAt || Date.now();
+		const now = new Date();
+		const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+		const startOfYesterday = startOfToday - 86400000;
+		const startOfWeek = startOfToday - 7 * 86400000;
+
+		if (ts >= startOfToday) return 'Today';
+		if (ts >= startOfYesterday) return 'Yesterday';
+		if (ts >= startOfWeek) return 'Previous 7 Days';
+		return 'Older';
+	}
+
+	function formatShortTime(session) {
+		if (session.status === 'running') return 'Running';
+		if (!session.createdAt) return session.timestamp || 'now';
+		const diffSec = Math.max(1, Math.floor((Date.now() - session.createdAt) / 1000));
+		if (diffSec < 60) return 'now';
+		const diffMin = Math.floor(diffSec / 60);
+		if (diffMin < 60) return diffMin + 'm';
+		const diffHr = Math.floor(diffMin / 60);
+		if (diffHr < 24) return diffHr + 'h';
+		const diffDays = Math.floor(diffHr / 24);
+		return diffDays + 'd';
+	}
+
 	window.addEventListener('message', event => {
 		const msg = event.data;
 		if (msg.type === 'state') {
 			state.sessions = msg.sessions || [];
-			state.selectedSessionId = msg.selectedSessionId;
+			state.selectedSessionId = msg.selectedSessionId || null;
+			if (msg.workspaceName) state.workspaceName = msg.workspaceName;
 			render();
 		}
 	});
@@ -270,42 +411,80 @@ export class OmenConversationsSidebarProvider implements vscode.WebviewViewProvi
 		const action = actionEl.getAttribute('data-action');
 		const sessionId = actionEl.getAttribute('data-session-id');
 
-		if (action === 'newConversation') {
-			vscode.postMessage({ type: 'newConversation' });
-		} else if (action === 'openAutomations') {
-			vscode.postMessage({ type: 'openAutomations' });
-		} else if (action === 'openCustomizations') {
-			vscode.postMessage({ type: 'openCustomizations' });
-		} else if (action === 'openSettings') {
-			vscode.postMessage({ type: 'openSettings' });
-		} else if (action === 'selectConversation' && sessionId) {
-			vscode.postMessage({ type: 'selectConversation', sessionId });
+		switch (action) {
+			case 'newConversation':
+				vscode.postMessage({ type: 'newConversation' });
+				break;
+			case 'selectConversation':
+				if (sessionId) {
+					vscode.postMessage({ type: 'selectConversation', sessionId });
+				}
+				break;
+			case 'deleteConversation':
+				e.stopPropagation();
+				if (sessionId) {
+					vscode.postMessage({ type: 'deleteConversation', sessionId });
+				}
+				break;
+			case 'openCodebase':
+				vscode.postMessage({ type: 'openCodebase' });
+				break;
+			case 'openClusterHub':
+				vscode.postMessage({ type: 'openClusterHub' });
+				break;
+			case 'openDocsHub':
+				vscode.postMessage({ type: 'openDocsHub' });
+				break;
+			case 'openSettings':
+				vscode.postMessage({ type: 'openSettings' });
+				break;
 		}
 	});
 
 	function render() {
-		const countEl = document.getElementById('convCount');
-		const listEl = document.getElementById('threadList');
-
-		countEl.textContent = String(state.sessions.length);
-
-		if (state.sessions.length === 0) {
-			listEl.innerHTML = '<div class="empty-hint">No active conversations.<br>Click <b>+ New Conversation</b> to open Agent Mode.</div>';
+		const container = document.getElementById('threadsContainer');
+		if (!state.sessions || state.sessions.length === 0) {
+			container.innerHTML = \`
+				<div class="date-group">
+					<div class="date-header">Today</div>
+					<div class="empty-state">No conversations yet</div>
+				</div>
+			\`;
 			return;
 		}
 
-		listEl.innerHTML = state.sessions.map(s => {
-			const isActive = s.id === state.selectedSessionId ? 'active' : '';
-			const safeId = escapeHtml(s.id);
-			const safeTitle = escapeHtml(s.title);
-			const safeTime = escapeHtml(s.timestamp);
-			return \`
-				<div class="thread-item \${isActive}" data-action="selectConversation" data-session-id="\${safeId}">
-					<span class="thread-title">\${safeTitle}</span>
-					<span class="thread-time">\${safeTime}</span>
-				</div>
-			\`;
-		}).join('');
+		const bucketOrder = ['Today', 'Yesterday', 'Previous 7 Days', 'Older'];
+		const buckets = new Map();
+		for (const b of bucketOrder) {
+			buckets.set(b, []);
+		}
+
+		for (const s of state.sessions) {
+			const bucket = getDateBucket(s);
+			buckets.get(bucket).push(s);
+		}
+
+		let html = '';
+		for (const bucketName of bucketOrder) {
+			const list = buckets.get(bucketName);
+			if (!list || list.length === 0) continue;
+
+			html += \`<div class="date-group"><div class="date-header">\${escapeHtml(bucketName)}</div>\`;
+			for (const s of list) {
+				const isSelected = s.id === state.selectedSessionId;
+				const timeStr = formatShortTime(s);
+				html += \`
+					<div class="sidebar-row \${isSelected ? 'selected' : ''}" data-action="selectConversation" data-session-id="\${escapeHtml(s.id)}">
+						<span class="row-title">\${escapeHtml(s.title)}</span>
+						<span class="row-meta">\${escapeHtml(timeStr)}</span>
+						<button class="btn-delete" data-action="deleteConversation" data-session-id="\${escapeHtml(s.id)}" title="Delete">Delete</button>
+					</div>
+				\`;
+			}
+			html += \`</div>\`;
+		}
+
+		container.innerHTML = html;
 	}
 
 	vscode.postMessage({ type: 'ready' });

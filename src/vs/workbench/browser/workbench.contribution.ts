@@ -156,7 +156,7 @@ const registry = Registry.as<IConfigurationRegistry>(
 					"showEditorTabs",
 					"Controls whether opened editors should show as individual tabs, one single large tab or if the title area should not be shown.",
 				),
-				default: "multiple",
+				default: "none",
 			},
 			[LayoutSettings.EDITOR_ACTIONS_LOCATION]: {
 				type: "string",
@@ -193,7 +193,7 @@ const registry = Registry.as<IConfigurationRegistry>(
 					"editorActionsLocation",
 					"Controls where the editor actions are shown.",
 				),
-				default: "default",
+				default: "hidden",
 				agentsWindow: { default: "default", readOnly: true },
 			},
 			"workbench.editor.alwaysShowEditorActions": {

@@ -7,7 +7,7 @@
 .monaco-workbench .part.titlebar {
 	display: flex;
 	flex-direction: row;
-	box-shadow: var(--vscode-shadow-md);
+	box-shadow: none;
 }
 
 .monaco-workbench.mac .part.titlebar {
@@ -74,26 +74,30 @@
 
 .monaco-workbench .part.titlebar > .titlebar-container.has-center > .titlebar-left {
 	order: 0;
-	width: 20%;
-	flex-grow: 2;
+	width: auto;
+	flex-grow: 0;
 	justify-content: flex-start;
+}
+
+.monaco-workbench.mac:not(.web) .part.titlebar > .titlebar-container.has-center > .titlebar-left {
+	width: 78px;
+	flex-shrink: 0;
 }
 
 .monaco-workbench .part.titlebar > .titlebar-container.has-center > .titlebar-center {
 	order: 1;
-	width: 60%;
+	width: auto;
 	max-width: fit-content;
 	min-width: 0px;
-	margin: 0 10px;
-	/* flex-shrink: 10; */
-	justify-content: center;
+	margin: 0 4px;
+	justify-content: flex-start;
 }
 
 .monaco-workbench .part.titlebar > .titlebar-container.has-center > .titlebar-right {
 	order: 2;
-	width: 20%;
+	width: auto;
 	min-width: min-content;
-	flex-grow: 2;
+	flex-grow: 1;
 	justify-content: flex-end;
 }
 
@@ -171,16 +175,15 @@
 
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center {
 	display: flex;
-	align-items: stretch;
+	align-items: center;
 	color: var(--vscode-commandCenter-foreground);
-	background-color: var(--vscode-commandCenter-background);
-	border: 1px solid var(--vscode-commandCenter-border);
+	background-color: transparent;
+	border: none;
 	overflow: hidden;
-	margin: 0 6px;
+	margin: 0 2px;
 	border-radius: var(--vscode-cornerRadius-medium);
 	height: 22px;
-	width: 38vw;
-	max-width: 600px;
+	width: auto;
 }
 
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center .action-item.command-center-quick-pick {

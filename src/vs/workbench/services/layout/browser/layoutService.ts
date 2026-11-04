@@ -82,7 +82,7 @@ export const enum ModernUIDensity {
  * (`src/vs/workbench/browser/media/floatingPanels.css`, `.floating-panels`).
  * Keep in sync with the `--vscode-spacing-size40` (4px) token used there.
  */
-export const FLOATING_PANEL_MARGIN = 4;
+export const FLOATING_PANEL_MARGIN = 0;
 
 /**
  * Compact Modern UI density removes the gaps between cards.

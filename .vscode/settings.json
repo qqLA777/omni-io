@@ -44,10 +44,22 @@
 		"**/.DS_Store": true,
 		".vscode-test": true,
 		"cli/target": true,
+		"extensions/copilot": true,
 		"build/**/*.js.map": true,
 		"build/**/*.js": {
 			"when": "$(basename).ts"
 		},
+	},
+	"files.watcherExclude": {
+		"**/.git/objects/**": true,
+		"**/.git/subtree-cache/**": true,
+		"**/node_modules/**": true,
+		"out/**": true,
+		"out-build/**": true,
+		"out-vscode/**": true,
+		".build/**": true,
+		"cli/target/**": true,
+		"extensions/copilot/**": true
 	},
 	"files.associations": {
 		"cglicenses.json": "jsonc",
@@ -191,10 +203,7 @@
 	"eslint.useFlatConfig": true,
 	"emmet.excludeLanguages": [],
 	"gulp.autoDetect": "off",
-	"rust-analyzer.linkedProjects": [
-		"cli/Cargo.toml",
-		"copilot_shim/Cargo.toml"
-	],
+	"rust-analyzer.linkedProjects": [],
 	"conventionalCommits.scopes": [
 		"tree",
 		"scm",

@@ -1,7 +1,7 @@
 {
   "name": "omen-models",
   "displayName": "Omen AI Models & Downloader",
-  "description": "Universal Language Model Provider (DeepSeek, OpenAI, Ollama) and In-Editor Model Downloader for Omen",
+  "description": "Universal Language Model Provider (Local Ollama, LAN Cluster, DeepSeek, OpenAI, Anthropic, Gemini, Meta, OpenRouter) and Default Chat Participant for Omen",
   "version": "0.1.0",
   "publisher": "omen",
   "license": "MIT",
@@ -16,7 +16,10 @@
     "*"
   ],
   "enabledApiProposals": [
-    "chatProvider"
+    "chatProvider",
+    "defaultChatParticipant",
+    "chatParticipantAdditions",
+    "chatParticipantPrivate"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -26,23 +29,51 @@
         "displayName": "Omen AI Models"
       }
     ],
+    "chatParticipants": [
+      {
+        "id": "omen.agent",
+        "name": "omen",
+        "fullName": "Omen Agent",
+        "description": "Build, edit, and ask with Local Ollama, LAN GPU Cluster, or Third-Party Cloud LLMs",
+        "isDefault": true,
+        "isSticky": true,
+        "modes": [
+          "agent",
+          "ask",
+          "edit"
+        ],
+        "locations": [
+          "panel",
+          "editor",
+          "terminal",
+          "notebook"
+        ],
+        "commands": [
+          {
+            "name": "edit",
+            "description": "Edit the active workspace file and stage a side-by-side diff"
+          },
+          {
+            "name": "cluster",
+            "description": "Show LAN GPU Cluster status and paired workers"
+          },
+          {
+            "name": "keys",
+            "description": "Configure Third-Party LLM API Keys"
+          }
+        ]
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "omen-conversations",
-          "title": "Conversations",
+          "title": "Chat",
           "icon": "$(comment-discussion)"
-        }
-      ],
-      "secondarySidebar": [
-        {
-          "id": "omen-docs",
-          "title": "Docs & RAG",
-          "icon": "$(book)"
         },
         {
-          "id": "omen-cluster",
-          "title": "Cluster",
+          "id": "omen-tools",
+          "title": "Omen Cluster & Docs",
           "icon": "$(server-process)"
         }
       ]
@@ -52,40 +83,29 @@
         {
           "type": "webview",
           "id": "omen.conversationsView",
-          "name": "Conversations",
+          "name": "Chat",
           "icon": "$(comment-discussion)"
         }
       ],
-      "explorer": [
+      "omen-tools": [
         {
           "type": "webview",
-          "id": "omen.agentsView",
-          "name": "Agents",
-          "icon": "$(robot)",
-          "order": 100
-        }
-      ],
-      "omen-docs": [
+          "id": "omen.clusterView",
+          "name": "Compute Cluster",
+          "icon": "$(server-process)"
+        },
         {
           "type": "webview",
           "id": "omen.docsView",
           "name": "Docs & RAG",
           "icon": "$(book)"
         }
-      ],
-      "omen-cluster": [
-        {
-          "type": "webview",
-          "id": "omen.clusterView",
-          "name": "Compute Cluster",
-          "icon": "$(server-process)"
-        }
       ]
     },
     "commands": [
       {
         "command": "omen.openAgentHub",
-        "title": "Open Antigravity Agent Mode Canvas",
+        "title": "Open Built-in AI Chat in Center Editor",
         "category": "Omen"
       },
       {
@@ -95,7 +115,12 @@
       },
       {
         "command": "omen.setApiKey",
-        "title": "Set API Key (Meta Muse / DeepSeek / OpenAI)",
+        "title": "Set API Key (DeepSeek / OpenAI / Anthropic / Gemini / Meta / OpenRouter)",
+        "category": "Omen"
+      },
+      {
+        "command": "omen.openSettingsHub",
+        "title": "Open Settings & External API Keys Page",
         "category": "Omen"
       },
       {
@@ -105,23 +130,50 @@
       },
       {
         "command": "omen.openDocsHub",
-        "title": "Open Docs & RAG Hub (Right Side Bar)",
+        "title": "Open Docs & RAG Hub",
         "category": "Omen"
       },
       {
         "command": "omen.openClusterHub",
-        "title": "Open Compute Cluster & Pairing Portal (Right Side Bar)",
+        "title": "Open Compute Cluster & Pairing Portal",
         "category": "Omen"
       },
       {
         "command": "omen.openAgentsView",
-        "title": "Focus Agents Pane (Explorer)",
+        "title": "Focus Conversations Sidebar",
         "category": "Omen"
       },
       {
         "command": "omen.newAgent",
-        "title": "Start New Agent Task",
+        "title": "Start New Chat in Center Editor",
         "category": "Omen"
+      },
+      {
+        "command": "omen.reviewSessionDiff",
+        "title": "Review Staged Agent Diff",
+        "category": "Omen"
+      },
+      {
+        "command": "omen.acceptSessionDiff",
+        "title": "Accept Staged Agent Diff",
+        "category": "Omen"
+      },
+      {
+        "command": "omen.rejectSessionDiff",
+        "title": "Reject Staged Agent Diff",
+        "category": "Omen"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "omen.conversationsView.focus",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e"
+      },
+      {
+        "command": "omen.conversationsView.focus",
+        "key": "ctrl+l",
+        "mac": "cmd+l"
       }
     ],
     "menus": {
@@ -140,6 +192,9 @@
         },
         {
           "command": "omen.setApiKey"
+        },
+        {
+          "command": "omen.openSettingsHub"
         },
         {
           "command": "omen.refreshModels"
@@ -168,12 +223,32 @@
         "omen.providers.openai.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable OpenAI models (gpt-4o, gpt-4o-mini, o1, o3-mini)"
+          "description": "Enable OpenAI models (gpt-4o, gpt-4o-mini, o3-mini)"
         },
         "omen.providers.openai.baseUrl": {
           "type": "string",
           "default": "https://api.openai.com/v1",
           "description": "Custom OpenAI API endpoint"
+        },
+        "omen.providers.anthropic.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Anthropic Claude models (claude-3-7-sonnet-latest, claude-3-5-haiku-latest)"
+        },
+        "omen.providers.anthropic.baseUrl": {
+          "type": "string",
+          "default": "https://api.anthropic.com/v1",
+          "description": "Anthropic API endpoint"
+        },
+        "omen.providers.gemini.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Google Gemini models (gemini-2.5-pro, gemini-2.5-flash)"
+        },
+        "omen.providers.gemini.baseUrl": {
+          "type": "string",
+          "default": "https://generativelanguage.googleapis.com/v1beta/openai",
+          "description": "Google Gemini OpenAI-compatible API endpoint"
         },
         "omen.providers.meta.enabled": {
           "type": "boolean",
@@ -182,8 +257,18 @@
         },
         "omen.providers.meta.baseUrl": {
           "type": "string",
-          "default": "https://api.meta.com/v1",
-          "description": "Meta Model API endpoint URL (or OpenAI-compatible proxy)"
+          "default": "https://api.meta.ai/v1",
+          "description": "Meta Model API endpoint URL (https://api.meta.ai/v1)"
+        },
+        "omen.providers.openrouter.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable OpenRouter unified third-party models"
+        },
+        "omen.providers.openrouter.baseUrl": {
+          "type": "string",
+          "default": "https://openrouter.ai/api/v1",
+          "description": "OpenRouter API endpoint URL"
         },
         "omen.providers.ollama.enabled": {
           "type": "boolean",

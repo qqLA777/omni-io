@@ -175,63 +175,31 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
 
 							const action = this.action;
 
-							// icon (search) - hidden in compact mode
+							// icon (search) - always compact icon button without wide text box
 							const searchIcon = document.createElement('span');
 							searchIcon.ariaHidden = 'true';
 							searchIcon.className = action.class ?? '';
 							searchIcon.classList.add('search-icon');
 
-							// label: just workspace name and optional decorations
-							const label = this._getLabel();
-							const labelElement = document.createElement('span');
-							labelElement.classList.add('search-label');
-							labelElement.textContent = label;
-							if (isCompactMode) {
-								reset(container, labelElement);
-							} else {
-								reset(container, searchIcon, labelElement);
-							}
+							reset(container, searchIcon);
 
 							const hover = this._store.add(that._hoverService.setupManagedHover(that._hoverDelegate, container, this.getTooltip()));
 
-							// update label & tooltip when window title changes
+							// update tooltip when window title changes
 							this._store.add(that._windowTitle.onDidChange(() => {
 								hover.update(this.getTooltip());
-								labelElement.textContent = this._getLabel();
 							}));
 
-							// update label & tooltip when tabs visibility changes
+							// update tooltip when tabs visibility changes
 							this._store.add(that._editorGroupService.onDidChangeEditorPartOptions(({ newPartOptions, oldPartOptions }) => {
 								if (newPartOptions.showTabs !== oldPartOptions.showTabs) {
 									hover.update(this.getTooltip());
-									labelElement.textContent = this._getLabel();
 								}
 							}));
 						}
 
 						protected override getTooltip() {
 							return that.getTooltip();
-						}
-
-						private _getLabel(): string {
-							const { prefix, suffix } = that._windowTitle.getTitleDecorations();
-							let label = that._windowTitle.workspaceName;
-							if (that._windowTitle.isCustomTitleFormat()) {
-								label = that._windowTitle.getWindowTitle();
-							} else if (that._editorGroupService.partOptions.showTabs === 'none') {
-								label = that._windowTitle.fileName ?? label;
-							}
-							if (!label) {
-								label = localize('label.dfl', "Search");
-							}
-							if (prefix) {
-								label = localize('label1', "{0} {1}", prefix, label);
-							}
-							if (suffix) {
-								label = localize('label2', "{0} {1}", label, suffix);
-							}
-
-							return label.replaceAll(/\r\n|\r|\n/g, '\u23CE');
 						}
 					});
 				}

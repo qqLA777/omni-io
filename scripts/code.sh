@@ -25,9 +25,17 @@ function code() {
 		CODE=".build/electron/$NAME"
 	fi
 
+	# Load environment variables from .env if present
+	if [ -f "$ROOT/.env" ]; then
+		set -a
+		source "$ROOT/.env"
+		set +a
+	fi
+
 	# Get electron, compile, built-in extensions
 	if [[ -z "${VSCODE_SKIP_PRELAUNCH}" ]]; then
 		node build/lib/preLaunch.ts
+		npm --prefix "$ROOT/extensions/omen-models" run compile
 	fi
 
 	# Manage built-in extensions
@@ -49,8 +57,13 @@ function code() {
 		DISABLE_TEST_EXTENSION=""
 	fi
 
+	DEFAULT_USER_DATA_DIR=""
+	if [[ "$@" != *"--user-data-dir"* ]]; then
+		DEFAULT_USER_DATA_DIR="--user-data-dir /tmp/omen-dev-profile"
+	fi
+
 	# Launch Code
-	exec "$CODE" . $DISABLE_TEST_EXTENSION "$@"
+	exec "$CODE" . $DISABLE_TEST_EXTENSION $DEFAULT_USER_DATA_DIR "$@"
 }
 
 function code-wsl()

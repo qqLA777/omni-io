@@ -170,7 +170,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	show(): void {
-		if (this.overlay) {
+		if (true || this.overlay) {
 			return;
 		}
 

@@ -496,24 +496,6 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 		this.title = append(this.centerContent, $('div.window-title'));
 		this.createTitle();
 
-		// Center-Adjacent Toolbar
-		if (hasCustomTitlebar(this.configurationService, this.titleBarStyle)) {
-			const centerAdjacentToolBarElement = append(this.rightContent, $('div.center-adjacent-toolbar-container'));
-			this.centerAdjacentToolBarElement = centerAdjacentToolBarElement;
-			const centerAdjacentToolBar = this.centerAdjacentToolBarDisposable.add(this.instantiationService.createInstance(MenuWorkbenchToolBar, centerAdjacentToolBarElement, MenuId.TitleBarAdjacentCenter, {
-				contextMenu: MenuId.TitleBarContext,
-				hiddenItemStrategy: HiddenItemStrategy.NoHide,
-				toolbarOptions: {
-					primaryGroup: () => true,
-				},
-				actionViewItemProvider: (action, options) => createActionViewItem(this.instantiationService, action, options),
-				hoverDelegate: this.hoverDelegate
-			}));
-
-			// Re-evaluate fit when items change, see #303222.
-			this.centerAdjacentToolBarDisposable.add(centerAdjacentToolBar.onDidChangeMenuItems(() => this.titleBarToolBarOverflowScheduler.schedule()));
-		}
-
 		// Update Toolbar (before the right-aligned toolbar actions)
 		if (hasCustomTitlebar(this.configurationService, this.titleBarStyle)) {
 			const updateToolBarElement = append(this.rightContent, $('div.update-toolbar-container'));
@@ -765,8 +747,8 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 				);
 			}
 
-			// --- Activity Actions (always at the end)
-			if (this.activityActionsEnabled) {
+			// --- Activity Actions (disabled in Pure Omen UI to hide Account/GitHub icons)
+			if (false && this.activityActionsEnabled) {
 				if (isAccountsActionVisible(this.storageService)) {
 					actions.primary.push(ACCOUNTS_ACTIVITY_TILE_ACTION);
 				}

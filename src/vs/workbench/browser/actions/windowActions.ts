@@ -9,7 +9,7 @@ import { IDialogService } from '../../../platform/dialogs/common/dialogs.js';
 import { MenuRegistry, MenuId, Action2, registerAction2 } from '../../../platform/actions/common/actions.js';
 import { KeyChord, KeyCode, KeyMod } from '../../../base/common/keyCodes.js';
 import { IsMainWindowFullscreenContext } from '../../common/contextkeys.js';
-import { IsMacNativeContext, IsDevelopmentContext, IsWebContext, IsIOSContext } from '../../../platform/contextkey/common/contextkeys.js';
+import { IsMacNativeContext, IsWebContext, IsIOSContext } from '../../../platform/contextkey/common/contextkeys.js';
 import { Categories } from '../../../platform/action/common/actionCommonCategories.js';
 import { KeybindingsRegistry, KeybindingWeight } from '../../../platform/keybinding/common/keybindingsRegistry.js';
 import { IQuickInputButton, IQuickInputService, IQuickPickSeparator, IKeyMods, IQuickPickItem } from '../../../platform/quickinput/common/quickInput.js';
@@ -377,11 +377,18 @@ export class ReloadWindowAction extends Action2 {
 			title: localize2('reloadWindow', 'Reload Window'),
 			category: Categories.Developer,
 			f1: true,
+			icon: Codicon.refresh,
 			keybinding: {
 				weight: KeybindingWeight.WorkbenchContrib + 50,
-				when: IsDevelopmentContext,
 				primary: KeyMod.CtrlCmd | KeyCode.KeyR
-			}
+			},
+			menu: [
+				{
+					id: MenuId.CommandCenter,
+					order: 2.5,
+					when: ContextKeyExpr.has('config.workbench.navigationControl.enabled')
+				}
+			]
 		});
 	}
 

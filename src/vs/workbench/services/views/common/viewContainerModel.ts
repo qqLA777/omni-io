@@ -667,6 +667,9 @@ export class ViewContainerModel extends Disposable implements IViewContainerMode
 	}
 
 	private isViewDescriptorVisibleWhenActive(viewDescriptorItem: IViewDescriptorItem): boolean {
+		if (!viewDescriptorItem.viewDescriptor.canToggleVisibility || viewDescriptorItem.viewDescriptor.id === 'omen.conversationsView') {
+			return true;
+		}
 		if (viewDescriptorItem.viewDescriptor.workspace) {
 			return !!viewDescriptorItem.state.visibleWorkspace;
 		}

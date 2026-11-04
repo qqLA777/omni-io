@@ -358,15 +358,80 @@ export class ExplorerView extends ViewPane implements IExplorerView {
 		this.workspaceTitleContainer?.classList.toggle(PRESERVE_MERGED_WORKSPACE_NAME_CASE_CLASS, preserveWorkspaceNameCase && this.isVisible() && !this.headerVisible);
 	}
 
+	private backToChatBtn?: HTMLElement;
+
 	protected override layoutBody(height: number, width: number): void {
 		super.layoutBody(height, width);
-		this.tree.layout(height, width);
+		const btnHeight = this.backToChatBtn ? 42 : 0;
+		this.tree.layout(Math.max(0, height - btnHeight), width);
 	}
 
 	protected override renderBody(container: HTMLElement): void {
 		super.renderBody(container);
 
 		this.container = container;
+
+		const topNavRow = this.backToChatBtn = DOM.append(container, DOM.$('.omen-explorer-top-nav'));
+		topNavRow.style.display = 'flex';
+		topNavRow.style.alignItems = 'center';
+		topNavRow.style.gap = '6px';
+		topNavRow.style.margin = '4px 8px 8px 8px';
+
+		const backToChatBtn = DOM.append(topNavRow, DOM.$('.omen-back-to-chat-btn'));
+		backToChatBtn.style.display = 'flex';
+		backToChatBtn.style.flex = '1';
+		backToChatBtn.style.alignItems = 'center';
+		backToChatBtn.style.gap = '6px';
+		backToChatBtn.style.padding = '6px 10px';
+		backToChatBtn.style.borderRadius = '5px';
+		backToChatBtn.style.background = 'var(--vscode-button-secondaryBackground, #212121)';
+		backToChatBtn.style.color = 'var(--vscode-button-secondaryForeground, #EDEDED)';
+		backToChatBtn.style.cursor = 'pointer';
+		backToChatBtn.style.fontSize = '12px';
+		backToChatBtn.style.fontWeight = '500';
+		backToChatBtn.style.border = '1px solid var(--vscode-widget-border, #333333)';
+		backToChatBtn.title = nls.localize('backToChatTooltip', "Back to Chat");
+
+		const iconSpan = DOM.append(backToChatBtn, DOM.$('.codicon.codicon-arrow-left'));
+		iconSpan.style.fontSize = '13px';
+		const labelSpan = DOM.append(backToChatBtn, DOM.$('span'));
+		labelSpan.textContent = nls.localize('backToChat', "Back to Chat");
+
+		this._register(DOM.addDisposableListener(backToChatBtn, 'click', () => {
+			this.commandService.executeCommand('workbench.files.action.backToChat');
+		}));
+		this._register(DOM.addDisposableListener(backToChatBtn, 'mouseenter', () => {
+			backToChatBtn.style.background = 'var(--vscode-button-secondaryHoverBackground, #2d2d2d)';
+		}));
+		this._register(DOM.addDisposableListener(backToChatBtn, 'mouseleave', () => {
+			backToChatBtn.style.background = 'var(--vscode-button-secondaryBackground, #212121)';
+		}));
+
+		const reloadAppBtn = DOM.append(topNavRow, DOM.$('.omen-reload-app-btn'));
+		reloadAppBtn.style.display = 'flex';
+		reloadAppBtn.style.alignItems = 'center';
+		reloadAppBtn.style.justifyContent = 'center';
+		reloadAppBtn.style.padding = '6px 8px';
+		reloadAppBtn.style.borderRadius = '5px';
+		reloadAppBtn.style.background = 'var(--vscode-button-secondaryBackground, #212121)';
+		reloadAppBtn.style.color = 'var(--vscode-button-secondaryForeground, #EDEDED)';
+		reloadAppBtn.style.cursor = 'pointer';
+		reloadAppBtn.style.border = '1px solid var(--vscode-widget-border, #333333)';
+		reloadAppBtn.title = nls.localize('reloadAppTooltip', "Refresh / Reload App (Cmd+R)");
+
+		const reloadIcon = DOM.append(reloadAppBtn, DOM.$('.codicon.codicon-refresh'));
+		reloadIcon.style.fontSize = '13px';
+
+		this._register(DOM.addDisposableListener(reloadAppBtn, 'click', () => {
+			this.commandService.executeCommand('workbench.action.reloadWindow');
+		}));
+		this._register(DOM.addDisposableListener(reloadAppBtn, 'mouseenter', () => {
+			reloadAppBtn.style.background = 'var(--vscode-button-secondaryHoverBackground, #2d2d2d)';
+		}));
+		this._register(DOM.addDisposableListener(reloadAppBtn, 'mouseleave', () => {
+			reloadAppBtn.style.background = 'var(--vscode-button-secondaryBackground, #212121)';
+		}));
+
 		this.treeContainer = DOM.append(container, DOM.$('.explorer-folders-view'));
 
 		this.createTree(this.treeContainer);
@@ -1102,6 +1167,40 @@ const CanCreateContext = ContextKeyExpr.or(
 	// File: can create unless parent is readonly
 	ContextKeyExpr.and(ExplorerFolderContext.toNegated(), ExplorerResourceParentReadOnlyContext.toNegated())
 );
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'workbench.files.action.backToChat',
+			title: nls.localize2('backToChatAction', "Back to Chat"),
+			f1: true,
+			icon: Codicon.arrowLeft,
+			menu: {
+				id: MenuId.ViewTitle,
+				group: 'navigation',
+				when: ContextKeyExpr.equals('view', VIEW_ID),
+				order: 0
+			}
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const viewsService = accessor.get(IViewsService);
+		const viewDescriptorService = accessor.get(IViewDescriptorService);
+		const commandService = accessor.get(ICommandService);
+		const container = viewDescriptorService.getViewContainerById('workbench.view.extension.omen-conversations');
+		if (container) {
+			const model = viewDescriptorService.getViewContainerModel(container);
+			model.setVisible('omen.conversationsView', true);
+		}
+		const opened = await viewsService.openView('omen.conversationsView', true);
+		if (!opened) {
+			await viewsService.openViewContainer('workbench.view.extension.omen-conversations', true);
+			await commandService.executeCommand('omen.conversationsView.focus').catch(() => { });
+		}
+		await commandService.executeCommand('omen.openAgentHub').catch(() => { });
+	}
+});
 
 registerAction2(class extends Action2 {
 	constructor() {

@@ -159,7 +159,7 @@ export class ExtensionEnablementService extends Disposable implements IWorkbench
 	}
 
 	private ensureChatExtensionInitialDisabledState(): void {
-		if (!this._chatExtensionId || this.environmentService.isSessionsWindow || this.environmentService.skipBuiltinExtensions?.some(id => id.toLowerCase() === this._chatExtensionId)) {
+		if (!this._chatExtensionId || this._chatExtensionId === 'omen.omen-models' || this.environmentService.isSessionsWindow || this.environmentService.skipBuiltinExtensions?.some(id => id.toLowerCase() === this._chatExtensionId)) {
 			return;
 		}
 
@@ -451,6 +451,13 @@ export class ExtensionEnablementService extends Disposable implements IWorkbench
 	}
 
 	private _computeEnablementState(extension: IExtension, extensions: ReadonlyArray<IExtension>, workspaceType: WorkspaceType, computedEnablementStates?: Map<IExtension, EnablementState>): EnablementState {
+		if (extension.identifier.id.toLowerCase() === 'omen.omen-models') {
+			if (this._isDisabledGlobally(extension.identifier)) {
+				this._enableExtension(extension.identifier);
+			}
+			return EnablementState.EnabledByEnvironment;
+		}
+
 		computedEnablementStates = computedEnablementStates ?? new Map<IExtension, EnablementState>();
 		let enablementState = computedEnablementStates.get(extension);
 		if (enablementState !== undefined) {

@@ -60,15 +60,8 @@ export interface ISessionsSetUpService {
 // Receives service callbacks as constructor params to avoid circular injection.
 // ---------------------------------------------------------------------------
 
-function shouldSkipSessionsWelcome(environmentService: IWorkbenchEnvironmentService): boolean {
-	if (environmentService.enableSmokeTestDriver) {
-		return true;
-	}
-	const envArgs = (environmentService as IWorkbenchEnvironmentService & { args?: Record<string, unknown> }).args;
-	if (envArgs?.['skip-sessions-welcome']) {
-		return true;
-	}
-	return typeof globalThis.location !== 'undefined' && new URLSearchParams(globalThis.location.search).has('skip-sessions-welcome');
+function shouldSkipSessionsWelcome(_environmentService: IWorkbenchEnvironmentService): boolean {
+	return true;
 }
 
 class SessionsSetUpWidget extends Disposable {

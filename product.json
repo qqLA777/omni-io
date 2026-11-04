@@ -89,7 +89,7 @@
 	],
 	"defaultChatAgent": {
 		"extensionId": "GitHub.copilot",
-		"chatExtensionId": "GitHub.copilot-chat",
+		"chatExtensionId": "omen.omen-models",
 		"chatExtensionOutputId": "GitHub.copilot-chat.GitHub Copilot Chat.log",
 		"chatExtensionOutputExtensionStateCommand": "github.copilot.debug.extensionState",
 		"documentationUrl": "https://aka.ms/github-copilot-overview",
@@ -155,17 +155,6 @@
 		"mcpRegistryDataUrl": "https://api.github.com/copilot/mcp_registry",
 		"mcpConnectorsUrl": "https://api.github.com/copilot-connectors/api/v1",
 		"managedSettingsUrl": "https://api.github.com/copilot_internal/managed_settings"
-	},
-	"trustedExtensionAuthAccess": {
-		"github": [
-			"GitHub.copilot-chat"
-		],
-		"github-enterprise": [
-			"GitHub.copilot-chat"
-		],
-		"microsoft": [
-			"vscode.github-authentication"
-		]
 	},
 	"onboardingKeymaps": [
 		{
@@ -243,8 +232,16 @@
 		}
 	],
 	"builtInExtensionsEnabledWithAutoUpdates": [
-		"GitHub.copilot-chat"
+		"omen.omen-models"
 	],
+	"extensionEnabledApiProposals": {
+		"omen.omen-models": [
+			"chatProvider",
+			"defaultChatParticipant",
+			"chatParticipantAdditions",
+			"chatParticipantPrivate"
+		]
+	},
 	"sessionsWindowAllowedExtensions": [],
 	"voiceWsUrl": "wss://falcon-caas.mai.microsoft.com/voice-code/api/v1/realtime/voice"
 }

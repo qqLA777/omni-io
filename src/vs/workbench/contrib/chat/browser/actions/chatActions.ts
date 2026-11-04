@@ -226,6 +226,12 @@ abstract class OpenChatGlobalAction extends Action2 {
 	override async run(accessor: ServicesAccessor, opts?: string | IChatViewOpenOptions): Promise<IChatAgentResult & { type?: 'confirmation' } | undefined> {
 		opts = typeof opts === 'string' ? { query: opts } : opts;
 
+		const commandService = accessor.get(ICommandService);
+		await commandService.executeCommand('omen.conversationsView.focus');
+		return undefined;
+	}
+
+	private async _unusedLegacyOpenChat(accessor: ServicesAccessor, opts?: IChatViewOpenOptions): Promise<IChatAgentResult & { type?: 'confirmation' } | undefined> {
 		const chatService = accessor.get(IChatService);
 		const widgetService = accessor.get(IChatWidgetService);
 		const toolsService = accessor.get(ILanguageModelToolsService);

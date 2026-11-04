@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+/* eslint-disable local/code-no-unexternalized-strings */
 import * as vscode from "vscode";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -93,6 +94,10 @@ export class OmenDocsViewProvider implements vscode.WebviewViewProvider {
 					}
 					break;
 				}
+				case "backToChat": {
+					await vscode.commands.executeCommand("omen.openAgentHub");
+					break;
+				}
 			}
 		});
 
@@ -120,26 +125,50 @@ export class OmenDocsViewProvider implements vscode.WebviewViewProvider {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
 <style>
 	:root {
-		--bg: #161616;
-		--card-bg: #1C1C1C;
-		--border: #262626;
-		--fg: #E6E6E6;
-		--muted: #858585;
-		--accent-blue: #007acc;
+		/* Backgrounds (3 levels only) */
+		--bg-app:      #0f0f10;
+		--bg-sidebar:  #141415;
+		--bg-elevated: #1a1a1c;
+
+		/* Borders: nearly invisible */
+		--border:      rgba(255,255,255,0.06);
+		--border-focus: rgba(255,255,255,0.16);
+
+		/* Text */
+		--text-primary:   rgba(255,255,255,0.92);
+		--text-secondary: rgba(255,255,255,0.55);
+		--text-tertiary:  rgba(255,255,255,0.35);
+
+		/* One accent, used sparingly */
+		--accent: #4f8cff;
+
+		/* Shape and type */
+		--radius-sm: 6px;
+		--radius-md: 8px;
+		--radius-lg: 12px;
+		--font-ui: Inter, -apple-system, sans-serif;
+		--font-code: "JetBrains Mono", "SF Mono", monospace;
+
+		--bg: var(--bg-sidebar);
+		--card-bg: var(--bg-elevated);
+		--fg: var(--text-primary);
+		--muted: var(--text-secondary);
+		--accent-blue: var(--accent);
 	}
 	* { box-sizing: border-box; }
 	body {
 		margin: 0;
 		padding: 10px;
-		font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-		font-size: 11.5px;
-		color: var(--fg);
-		background: var(--bg);
+		font-family: var(--font-ui);
+		font-size: 13px;
+		color: var(--text-primary);
+		background: var(--bg-sidebar);
 		display: flex;
 		flex-direction: column;
 		height: 100vh;
 		gap: 8px;
 		user-select: none;
+		-webkit-font-smoothing: antialiased;
 	}
 	.header-bar {
 		display: flex;
@@ -217,6 +246,7 @@ export class OmenDocsViewProvider implements vscode.WebviewViewProvider {
 <body>
 	<div class="header-bar">
 		<div class="tab-group">
+			<button class="btn-tab" data-action="backToChat">← Chat</button>
 			<button class="btn-tab active">Docs Reader</button>
 			<button class="btn-tab" data-action="addCollection">+ Vector DB</button>
 		</div>
@@ -272,6 +302,8 @@ export class OmenDocsViewProvider implements vscode.WebviewViewProvider {
 			vscode.postMessage({ type: 'addRagCollection' });
 		} else if (action === 'openEditor') {
 			vscode.postMessage({ type: 'openInEditor' });
+		} else if (action === 'backToChat') {
+			vscode.postMessage({ type: 'backToChat' });
 		}
 	});
 

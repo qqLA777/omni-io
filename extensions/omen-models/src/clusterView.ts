@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+/* eslint-disable local/code-no-unexternalized-strings */
 import * as vscode from "vscode";
 import * as os from "os";
 import * as http from "http";
@@ -41,7 +42,7 @@ export interface ClusterState {
 	nodes: ClusterNode[];
 }
 
-export class OmenClusterViewProvider implements vscode.WebviewViewProvider {
+export class OmenClusterViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
 	public static readonly viewType = "omen.clusterView";
 	private _view?: vscode.WebviewView;
 	private _server?: http.Server;
@@ -118,6 +119,33 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider {
 		);
 	}
 
+	public getActiveWorker():
+		| {
+				name: string;
+				ip: string;
+				port: number;
+				gpuName: string;
+				models: string[];
+				online: boolean;
+		  }
+		| undefined {
+		const worker = this.getVerifiedWorkerNodes()[0];
+		if (!worker) {
+			return undefined;
+		}
+		return {
+			name: worker.name,
+			ip: worker.ip,
+			port: 11434,
+			gpuName: worker.gpuName,
+			models:
+				worker.installedModels && worker.installedModels.length > 0
+					? worker.installedModels
+					: ["qwen2.5-coder:7b"],
+			online: worker.status === "paired" || worker.status === "online",
+		};
+	}
+
 	public getStatusSummary(): string {
 		const host = this._state.nodes.find((n) => n.role === "host");
 		const workers = this.getVerifiedWorkerNodes();
@@ -167,6 +195,10 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider {
 				case "setBackend": {
 					this._state.backend = msg.backend;
 					this._saveAndNotify();
+					break;
+				}
+				case "backToChat": {
+					await vscode.commands.executeCommand("omen.openAgentHub");
 					break;
 				}
 			}
@@ -322,27 +354,51 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
 <style>
 	:root {
-		--bg: #161616;
-		--card-bg: #1C1C1C;
-		--border: #262626;
-		--fg: #E6E6E6;
-		--muted: #858585;
-		--accent-blue: #007acc;
-		--green: #27C93F;
-		--amber: #FFBD2E;
+		/* Backgrounds (3 levels only) */
+		--bg-app:      #0f0f10;
+		--bg-sidebar:  #141415;
+		--bg-elevated: #1a1a1c;
+
+		/* Borders: nearly invisible */
+		--border:      rgba(255,255,255,0.06);
+		--border-focus: rgba(255,255,255,0.16);
+
+		/* Text */
+		--text-primary:   rgba(255,255,255,0.92);
+		--text-secondary: rgba(255,255,255,0.55);
+		--text-tertiary:  rgba(255,255,255,0.35);
+
+		/* One accent, used sparingly */
+		--accent: #4f8cff;
+
+		/* Shape and type */
+		--radius-sm: 6px;
+		--radius-md: 8px;
+		--radius-lg: 12px;
+		--font-ui: Inter, -apple-system, sans-serif;
+		--font-code: "JetBrains Mono", "SF Mono", monospace;
+
+		--bg: var(--bg-sidebar);
+		--card-bg: var(--bg-elevated);
+		--fg: var(--text-primary);
+		--muted: var(--text-secondary);
+		--accent-blue: var(--accent);
+		--green: var(--accent);
+		--amber: var(--text-secondary);
 	}
 	* { box-sizing: border-box; }
 	body {
 		margin: 0;
 		padding: 10px;
-		font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-		font-size: 11.5px;
-		color: var(--fg);
-		background: var(--bg);
+		font-family: var(--font-ui);
+		font-size: 13px;
+		color: var(--text-primary);
+		background: var(--bg-sidebar);
 		display: flex;
 		flex-direction: column;
 		gap: 10px;
 		user-select: none;
+		-webkit-font-smoothing: antialiased;
 	}
 	.header-section {
 		display: flex;
@@ -435,8 +491,11 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
 	<div class="header-section">
-		<span class="title">Connected Hardware</span>
-		<button class="btn-action" data-action="refreshHardware">⟳ Refresh</button>
+		<div style="display: flex; align-items: center; gap: 8px;">
+			<button class="btn-action" data-action="backToChat">← Chat</button>
+			<span class="title">Connected Hardware</span>
+		</div>
+		<button class="btn-action" data-action="refreshHardware">Refresh</button>
 	</div>
 
 	<div class="card">
@@ -484,6 +543,8 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider {
 			vscode.postMessage({ type: 'pairNewWorker' });
 		} else if (action === 'removeWorker' && nodeId) {
 			vscode.postMessage({ type: 'removeWorker', nodeId });
+		} else if (action === 'backToChat') {
+			vscode.postMessage({ type: 'backToChat' });
 		}
 	});
 

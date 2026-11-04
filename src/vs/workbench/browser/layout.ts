@@ -11,7 +11,6 @@ import { onDidChangeFullscreen, isFullscreen, isWCOEnabled } from '../../base/br
 import { isWindows, isLinux, isMacintosh, isWeb, isIOS } from '../../base/common/platform.js';
 import { EditorInputCapabilities, GroupIdentifier, isResourceEditorInput, IUntypedEditorInput, pathsToEditors } from '../common/editor.js';
 import { SidebarPart } from './parts/sidebar/sidebarPart.js';
-import { PanelPart } from './parts/panel/panelPart.js';
 import { Position, Parts, PartOpensMaximizedOptions, IWorkbenchLayoutService, positionFromString, positionToString, partOpensMaximizedFromString, PanelAlignment, ActivityBarPosition, LayoutSettings, MULTI_WINDOW_PARTS, SINGLE_WINDOW_PARTS, ZenModeSettings, EditorTabsMode, EditorActionsLocation, shouldShowCustomTitleBar, isHorizontal, isMultiWindowPart, IPartVisibilityChangeEvent, isFloatingTopEdgeExposed, ModernUIDensity } from '../services/layout/browser/layoutService.js';
 import { isTemporaryWorkspace, IWorkspaceContextService, WorkbenchState } from '../../platform/workspace/common/workspace.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../platform/storage/common/storage.js';
@@ -633,7 +632,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 	}
 
 	isFloatingPanelsEnabled(): boolean {
-		return this.configurationService.getValue<boolean>(LayoutSettings.MODERN_UI) === true;
+		return false;
 	}
 
 	isModernUICompact(): boolean {
@@ -802,50 +801,17 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			runtime: layoutRuntimeState,
 		};
 
-		// Sidebar View Container To Restore
-		if (this.isVisible(Parts.SIDEBAR_PART)) {
-			let viewContainerToRestore = this.storageService.get(SidebarPart.activeViewletSettingsKey, StorageScope.WORKSPACE, this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Sidebar)?.id);
-			if (
-				!this.environmentService.isBuilt ||
-				lifecycleService.startupKind === StartupKind.ReloadedWindow ||
-				this.environmentService.isExtensionDevelopment && !this.environmentService.extensionTestsLocationURI
-			) {
-				// allow to restore a non-default viewlet in development mode or when window reloads
-			} else if (
-				viewContainerToRestore !== this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Sidebar)?.id &&
-				viewContainerToRestore !== this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.AuxiliaryBar)?.id
-			) {
-				// fallback to default viewlet otherwise if the viewlet is not a default viewlet
-				viewContainerToRestore = this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Sidebar)?.id;
-			}
+		// Sidebar View Container To Restore (Default to Omen Chat on Left Sidebar)
+		this.stateModel.setRuntimeValue(LayoutStateKeys.SIDEBAR_HIDDEN, false);
+		this.state.initialization.views.containerToRestore.sideBar = 'workbench.view.extension.omen-conversations';
 
-			if (viewContainerToRestore) {
-				this.state.initialization.views.containerToRestore.sideBar = viewContainerToRestore;
-			} else {
-				this.stateModel.setRuntimeValue(LayoutStateKeys.SIDEBAR_HIDDEN, true);
-			}
-		}
+		// Panel: hidden by default on startup so the Center AI Chat / Code Editor fills the full vertical height
+		this.stateModel.setRuntimeValue(LayoutStateKeys.PANEL_HIDDEN, true);
+		this.state.initialization.views.containerToRestore.panel = undefined;
 
-		// Panel View Container To Restore
-		if (this.isVisible(Parts.PANEL_PART)) {
-			const viewContainerToRestore = this.storageService.get(PanelPart.activePanelSettingsKey, StorageScope.WORKSPACE, this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Panel)?.id);
-
-			if (viewContainerToRestore) {
-				this.state.initialization.views.containerToRestore.panel = viewContainerToRestore;
-			} else {
-				this.stateModel.setRuntimeValue(LayoutStateKeys.PANEL_HIDDEN, true);
-			}
-		}
-
-		// Auxiliary View to restore
-		if (this.isVisible(Parts.AUXILIARYBAR_PART)) {
-			const viewContainerToRestore = this.storageService.get(AuxiliaryBarPart.activeViewSettingsKey, StorageScope.WORKSPACE, this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.AuxiliaryBar)?.id);
-			if (viewContainerToRestore) {
-				this.state.initialization.views.containerToRestore.auxiliaryBar = viewContainerToRestore;
-			} else {
-				this.stateModel.setRuntimeValue(LayoutStateKeys.AUXILIARYBAR_HIDDEN, true);
-			}
-		}
+		// Auxiliary Bar: permanently hidden by default so only the Left Chat Sidebar is used
+		this.stateModel.setRuntimeValue(LayoutStateKeys.AUXILIARYBAR_HIDDEN, true);
+		this.state.initialization.views.containerToRestore.auxiliaryBar = undefined;
 
 		// Window border
 		this.updateWindowBorder(true);
@@ -854,11 +820,11 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 	private getDefaultLayoutViews(environmentService: IBrowserWorkbenchEnvironmentService, storageService: IStorageService): string[] | undefined {
 		const defaultLayout = environmentService.options?.defaultLayout;
 		if (!defaultLayout) {
-			return undefined;
+			return ['omen.conversationsView'];
 		}
 
 		if (!defaultLayout.force && !storageService.isNew(StorageScope.WORKSPACE)) {
-			return undefined;
+			return ['omen.conversationsView'];
 		}
 
 		const { views } = defaultLayout;
@@ -866,7 +832,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			return views.map(view => view.id);
 		}
 
-		return undefined;
+		return ['omen.conversationsView'];
 	}
 
 	private shouldRestoreEditors(contextService: IWorkspaceContextService, initialEditorsState: IInitialEditorsState | undefined): boolean {
@@ -3023,7 +2989,7 @@ class LayoutStateModel extends Disposable {
 		const auxiliaryBarForceMaximized = this.configurationService.getValue(WorkbenchLayoutSettings.AUXILIARYBAR_FORCE_MAXIMIZED);
 		const workbenchState = this.contextService.getWorkbenchState();
 		const mainContainerDimension = configuration.mainContainerDimension;
-		LayoutStateKeys.SIDEBAR_SIZE.defaultValue = Math.min(220, mainContainerDimension.width / 4);
+		LayoutStateKeys.SIDEBAR_SIZE.defaultValue = 250;
 		LayoutStateKeys.SIDEBAR_HIDDEN.defaultValue = workbenchState === WorkbenchState.EMPTY || auxiliaryBarForceMaximized === true;
 		LayoutStateKeys.AUXILIARYBAR_SIZE.defaultValue = auxiliaryBarForceMaximized ? Math.max(420, mainContainerDimension.width / 2) : Math.min(420, mainContainerDimension.width / 3);
 		LayoutStateKeys.AUXILIARYBAR_HIDDEN.defaultValue = (() => {
@@ -3122,7 +3088,7 @@ class LayoutStateModel extends Disposable {
 
 		// Restrict auxiliary bar size in case of small window dimensions
 		if (this.isNew[StorageScope.WORKSPACE] && configuration.mainContainerDimension.width <= DEFAULT_WORKSPACE_WINDOW_DIMENSIONS.width) {
-			this.setInitializationValue(LayoutStateKeys.SIDEBAR_SIZE, Math.min(300, configuration.mainContainerDimension.width / 4));
+			this.setInitializationValue(LayoutStateKeys.SIDEBAR_SIZE, 250);
 			this.setInitializationValue(LayoutStateKeys.AUXILIARYBAR_SIZE, Math.min(300, configuration.mainContainerDimension.width / 4));
 		}
 	}

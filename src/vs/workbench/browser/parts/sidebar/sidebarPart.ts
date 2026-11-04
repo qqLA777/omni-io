@@ -45,27 +45,16 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 	//#region IView
 
-	readonly minimumWidth: number = 170;
-	readonly maximumWidth: number = Number.POSITIVE_INFINITY;
+	readonly minimumWidth: number = 260;
+	readonly maximumWidth: number = 260;
 	readonly minimumHeight: number = 0;
 	readonly maximumHeight: number = Number.POSITIVE_INFINITY;
-	override get snap(): boolean { return true; }
+	override get snap(): boolean { return false; }
 
 	readonly priority: LayoutPriority = LayoutPriority.Low;
 
 	get preferredWidth(): number | undefined {
-		const viewlet = this.getActivePaneComposite();
-
-		if (!viewlet) {
-			return undefined;
-		}
-
-		const width = viewlet.getOptimalWidth();
-		if (typeof width !== 'number') {
-			return undefined;
-		}
-
-		return Math.max(width, 250);
+		return 260;
 	}
 
 	private readonly activityBarPart = this._register(this.instantiationService.createInstance(ActivitybarPart, this.location, this));

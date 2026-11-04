@@ -8,6 +8,7 @@ import * as os from "os";
 import * as http from "http";
 import * as crypto from "crypto";
 import { execSync } from "child_process";
+import { LlamaCppManager } from "./llamacppManager.js";
 
 export type ComputeBackendMode =
 	| "local-cluster"
@@ -27,6 +28,15 @@ export interface ClusterNode {
 	installedModels?: string[];
 }
 
+export interface LlamaCppClusterStatus {
+	running: boolean;
+	baseUrl: string;
+	modelPath: string;
+	rpcServers: string;
+	models: string[];
+	lastError?: string;
+}
+
 export interface ClusterState {
 	backend: ComputeBackendMode;
 	pairingPin: string;
@@ -40,6 +50,7 @@ export interface ClusterState {
 	storageOffload: boolean;
 	modalGpuType: "T4" | "A10G" | "A100" | "H100";
 	nodes: ClusterNode[];
+	llamacpp: LlamaCppClusterStatus;
 }
 
 export class OmenClusterViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
@@ -47,6 +58,12 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider, vsco
 	private _view?: vscode.WebviewView;
 	private _server?: http.Server;
 	private _state: ClusterState;
+	private _llamacpp?: LlamaCppManager;
+
+	public setLlamaCppManager(manager: LlamaCppManager): void {
+		this._llamacpp = manager;
+		void this.refreshLlamaCppStatus();
+	}
 
 	private readonly _onDidChangeState = new vscode.EventEmitter<ClusterState>();
 	public readonly onDidChangeState = this._onDidChangeState.event;
@@ -93,6 +110,7 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider, vsco
 			initialNodes.push(...validWorkers);
 		}
 
+		const llamacppConfig = LlamaCppManager.getConfig();
 		this._state = {
 			backend: "local-single",
 			pairingPin: pin,
@@ -106,6 +124,13 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider, vsco
 			storageOffload: false,
 			modalGpuType: "A10G",
 			nodes: initialNodes,
+			llamacpp: {
+				running: false,
+				baseUrl: llamacppConfig.baseUrl,
+				modelPath: llamacppConfig.modelPath,
+				rpcServers: llamacppConfig.rpcServers,
+				models: [],
+			},
 		};
 	}
 
@@ -170,20 +195,38 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider, vsco
 			switch (msg.type) {
 				case "ready": {
 					this._postState();
+					void this.refreshLlamaCppStatus();
 					break;
 				}
 				case "refreshHardware": {
-					await this._refreshHardwareInfo();
+					await this.refreshHardware();
+					break;
+				}
+				case "llamacppStart": {
+					await vscode.commands.executeCommand("omen.llamacpp.start");
+					await this.refreshLlamaCppStatus();
+					break;
+				}
+				case "llamacppStop": {
+					await vscode.commands.executeCommand("omen.llamacpp.stop");
+					await this.refreshLlamaCppStatus();
+					break;
+				}
+				case "llamacppSetModel": {
+					await vscode.commands.executeCommand("omen.llamacpp.setModel");
+					await this.refreshLlamaCppStatus();
+					break;
+				}
+				case "llamacppSetWorker": {
+					const worker = typeof msg.worker === "string" ? msg.worker.trim() : "";
+					await vscode.workspace
+						.getConfiguration("omen.providers.llamacpp")
+						.update("rpcServers", worker, vscode.ConfigurationTarget.Global);
+					await this.refreshLlamaCppStatus();
 					break;
 				}
 				case "pairNewWorker": {
-					const ip = await vscode.window.showInputBox({
-						prompt: "Enter LAN IP address of Nitro 5 or worker device (e.g. 192.168.1.150)",
-						placeHolder: "192.168.1.xxx",
-					});
-					if (ip && ip.trim()) {
-						await this._addWorkerNode(ip.trim());
-					}
+					await this.pairWorker();
 					break;
 				}
 				case "removeWorker": {
@@ -201,10 +244,80 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider, vsco
 					await vscode.commands.executeCommand("omen.openAgentHub");
 					break;
 				}
+				case "toggleSidebar": {
+					await vscode.commands.executeCommand(
+						"workbench.action.toggleSidebarVisibility",
+					);
+					break;
+				}
 			}
 		});
 
 		this._postState();
+	}
+
+	public async refreshLlamaCppStatus(): Promise<void> {
+		const config = LlamaCppManager.getConfig();
+		let running = this._llamacpp?.isRunning() ?? false;
+		let models: string[] = [];
+		let lastError: string | undefined;
+		try {
+			if (this._llamacpp) {
+				const status = await this._llamacpp.getStatus();
+				running = status.running;
+				models = status.models;
+				lastError = status.lastError;
+			} else {
+				models = await LlamaCppManager.fetchModels(config.baseUrl);
+				running = models.length > 0;
+			}
+		} catch {
+			// Keep cached values
+		}
+		this._state.llamacpp = {
+			running,
+			baseUrl: config.baseUrl,
+			modelPath: config.modelPath,
+			rpcServers: config.rpcServers,
+			models,
+			lastError,
+		};
+		this._saveAndNotify();
+	}
+
+	/** Re-reads host hardware and re-probes every paired worker. Bound to the view title `refresh` action. */
+	public async refreshHardware(): Promise<void> {
+		this._postBusy(true);
+		try {
+			await this._refreshHardwareInfo();
+			await this.refreshLlamaCppStatus();
+		} finally {
+			this._postBusy(false);
+		}
+	}
+
+	/** Prompts for a worker IP and pairs it. Bound to the view title `add` action. */
+	public async pairWorker(): Promise<void> {
+		const ip = await vscode.window.showInputBox({
+			title: "Pair LAN Worker",
+			prompt: "Enter the LAN IP address of a machine running Ollama",
+			placeHolder: "192.168.1.150",
+			ignoreFocusOut: true,
+		});
+		if (ip && ip.trim()) {
+			this._postBusy(true);
+			try {
+				await this._addWorkerNode(ip.trim());
+			} finally {
+				this._postBusy(false);
+			}
+		}
+	}
+
+	private _postBusy(busy: boolean): void {
+		if (this._view) {
+			void this._view.webview.postMessage({ type: "busy", busy });
+		}
 	}
 
 	private async _refreshHardwareInfo(): Promise<void> {
@@ -289,11 +402,11 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider, vsco
 
 		if (reachable) {
 			vscode.window.showInformationMessage(
-				`✓ Connected to Nitro 5 / LAN worker at ${ip}. Discovered ${discoveredModels.length} model(s). Available in Model Picker.`,
+				`Connected to LAN worker at ${ip}. Discovered ${discoveredModels.length} model(s), now available in the model picker.`,
 			);
 		} else {
 			vscode.window.showWarningMessage(
-				`Could not reach Ollama at http://${ip}:11434. Make sure 'OLLAMA_HOST=0.0.0.0:11434 ollama serve' is running on your Nitro 5.`,
+				`Could not reach Ollama at http://${ip}:11434. Make sure 'OLLAMA_HOST=0.0.0.0:11434 ollama serve' is running on the worker.`,
 			);
 		}
 	}
@@ -354,167 +467,358 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider, vsco
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
 <style>
 	:root {
-		/* Backgrounds (3 levels only) */
-		--bg-app:      #0f0f10;
-		--bg-sidebar:  #141415;
-		--bg-elevated: #1a1a1c;
-
-		/* Borders: nearly invisible */
-		--border:      rgba(255,255,255,0.06);
-		--border-focus: rgba(255,255,255,0.16);
-
-		/* Text */
-		--text-primary:   rgba(255,255,255,0.92);
-		--text-secondary: rgba(255,255,255,0.55);
-		--text-tertiary:  rgba(255,255,255,0.35);
-
-		/* One accent, used sparingly */
-		--accent: #4f8cff;
-
-		/* Shape and type */
-		--radius-sm: 6px;
-		--radius-md: 8px;
-		--radius-lg: 12px;
-		--font-ui: Inter, -apple-system, sans-serif;
-		--font-code: "JetBrains Mono", "SF Mono", monospace;
-
-		--bg: var(--bg-sidebar);
-		--card-bg: var(--bg-elevated);
-		--fg: var(--text-primary);
-		--muted: var(--text-secondary);
-		--accent-blue: var(--accent);
-		--green: var(--accent);
-		--amber: var(--text-secondary);
+		/* Derive every color from the active theme so the view matches the workbench */
+		--fg: var(--vscode-foreground, #cccccc);
+		--muted: var(--vscode-descriptionForeground, rgba(204,204,204,0.6));
+		--surface: color-mix(in srgb, var(--fg) 4%, transparent);
+		--surface-hover: color-mix(in srgb, var(--fg) 7%, transparent);
+		--border: color-mix(in srgb, var(--fg) 9%, transparent);
+		--accent: var(--vscode-button-background, #4f8cff);
+		--accent-fg: var(--vscode-button-foreground, #ffffff);
+		--accent-hover: var(--vscode-button-hoverBackground, #3d7bf0);
+		--ok: var(--vscode-testing-iconPassed, #3fb950);
+		--warn: var(--vscode-editorWarning-foreground, #d29922);
+		--focus: var(--vscode-focusBorder, #4f8cff);
+		--mono: var(--vscode-editor-font-family, "SF Mono", Menlo, monospace);
+		--radius: 8px;
 	}
 	* { box-sizing: border-box; }
 	body {
 		margin: 0;
-		padding: 10px;
-		font-family: var(--font-ui);
-		font-size: 13px;
-		color: var(--text-primary);
-		background: var(--bg-sidebar);
+		padding: 10px 10px 14px;
+		font-family: var(--vscode-font-family, -apple-system, sans-serif);
+		font-size: var(--vscode-font-size, 13px);
+		color: var(--fg);
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
+		gap: 11px;
 		user-select: none;
 		-webkit-font-smoothing: antialiased;
 	}
-	.header-section {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding-bottom: 6px;
-		border-bottom: 1px solid var(--border);
+	body::-webkit-scrollbar { width: 4px; }
+	body::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }
+	svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+	/* Summary tiles */
+	.stats {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 5px;
 	}
-	.title {
-		font-size: 11px;
-		font-weight: 700;
+	.stat {
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 6px 8px;
+		min-width: 0;
+	}
+	.stat-value {
+		font-size: 15px;
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+		line-height: 1.2;
+	}
+	.stat-value small { font-size: 10.5px; font-weight: 500; color: var(--muted); margin-left: 2px; }
+	.stat-label { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+
+	/* Sections */
+	.section { display: flex; flex-direction: column; gap: 6px; }
+	.section-head {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 20px;
+	}
+	.section-title {
+		font-size: 10.5px;
+		font-weight: 600;
+		letter-spacing: 0.04em;
 		text-transform: uppercase;
-		letter-spacing: 0.5px;
 		color: var(--muted);
 	}
-	.btn-action {
-		background: #242424;
-		color: var(--fg);
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		padding: 4px 8px;
-		font-size: 11px;
-		cursor: pointer;
-		transition: background 0.15s ease;
+	.count {
+		font-size: 10px;
+		font-weight: 600;
+		min-width: 16px;
+		padding: 0 5px;
+		line-height: 15px;
+		text-align: center;
+		border-radius: 999px;
+		background: var(--vscode-badge-background, var(--surface-hover));
+		color: var(--vscode-badge-foreground, var(--fg));
 	}
-	.btn-action:hover {
-		background: #2e2e2e;
-		color: #FFF;
-	}
-	.card {
-		background: var(--card-bg);
+	.spacer { flex: 1; }
+
+	/* Node rows */
+	.list { display: flex; flex-direction: column; gap: 6px; }
+	.node {
+		display: grid;
+		grid-template-columns: 28px minmax(0, 1fr) auto;
+		column-gap: 8px;
+		row-gap: 6px;
+		align-items: center;
+		padding: 8px 10px;
+		background: var(--surface);
 		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		transition: background 120ms ease, border-color 120ms ease;
+	}
+	.node:hover { background: var(--surface-hover); }
+	.node-icon {
+		width: 28px;
+		height: 28px;
 		border-radius: 6px;
-		padding: 10px;
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
+		display: grid;
+		place-items: center;
+		color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 14%, transparent);
 	}
-	.node-item {
-		background: #212121;
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		padding: 8px;
+	.node-icon.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+	.node-text { min-width: 0; }
+	.node-name {
 		display: flex;
-		flex-direction: column;
+		align-items: center;
+		gap: 6px;
+		font-weight: 600;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.node-name span { overflow: hidden; text-overflow: ellipsis; }
+	.tag {
+		font-size: 10px;
+		font-weight: 600;
+		padding: 0 5px;
+		line-height: 15px;
+		border-radius: 4px;
+		color: var(--muted);
+		border: 1px solid var(--border);
+		flex-shrink: 0;
+	}
+	.node-sub {
+		font-family: var(--mono);
+		font-size: 11px;
+		color: var(--muted);
+		margin-top: 2px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.node-trail { display: flex; align-items: center; gap: 2px; }
+	.meta {
+		grid-column: 2 / -1;
+		display: flex;
+		flex-wrap: wrap;
 		gap: 4px;
 	}
-	.node-top {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-	.node-name {
-		font-weight: 600;
-		color: #EDEDED;
-	}
-	.status-badge {
-		font-size: 9.5px;
-		font-weight: 700;
-		padding: 1px 6px;
-		border-radius: 3px;
-		background: rgba(39, 201, 63, 0.15);
-		color: var(--green);
-		border: 1px solid rgba(39, 201, 63, 0.3);
-	}
-	.status-unverified {
-		font-size: 9.5px;
-		font-weight: 700;
-		padding: 1px 6px;
-		border-radius: 3px;
-		background: rgba(255, 189, 46, 0.15);
-		color: var(--amber);
-		border: 1px solid rgba(255, 189, 46, 0.3);
-	}
-	.node-details {
+	.chip {
 		font-size: 10.5px;
+		padding: 1px 6px;
+		border-radius: 4px;
 		color: var(--muted);
-		display: flex;
-		gap: 10px;
-		flex-wrap: wrap;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		white-space: nowrap;
 	}
-	.empty-hint {
+
+	/* Status pill */
+	.pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		font-size: 10.5px;
+		font-weight: 500;
+		padding: 1px 7px 1px 6px;
+		border-radius: 999px;
+		color: var(--ok);
+		background: color-mix(in srgb, var(--ok) 12%, transparent);
+		white-space: nowrap;
+	}
+	.pill::before {
+		content: "";
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		background: currentColor;
+		box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 25%, transparent);
+	}
+	.pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+
+	/* Buttons */
+	.icon-btn {
+		width: 22px;
+		height: 22px;
+		display: grid;
+		place-items: center;
+		padding: 0;
+		border: 0;
+		border-radius: 5px;
+		background: transparent;
 		color: var(--muted);
+		cursor: pointer;
+	}
+	.icon-btn:hover { background: var(--vscode-toolbar-hoverBackground, var(--surface-hover)); color: var(--fg); }
+	.node .icon-btn.reveal { opacity: 0; transition: opacity 120ms ease; }
+	.node:hover .icon-btn.reveal, .node:focus-within .icon-btn.reveal { opacity: 1; }
+	.btn-primary {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font: inherit;
+		font-size: 11.5px;
+		font-weight: 500;
+		padding: 4px 10px;
+		border: 0;
+		border-radius: 5px;
+		background: var(--accent);
+		color: var(--accent-fg);
+		cursor: pointer;
+	}
+	.btn-primary:hover { background: var(--accent-hover); }
+	.btn-primary svg { width: 14px; height: 14px; }
+	button:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
+	.btn-secondary {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font: inherit;
+		font-size: 11.5px;
+		font-weight: 500;
+		padding: 4px 10px;
+		border: 1px solid var(--border);
+		border-radius: 5px;
+		background: var(--surface);
+		color: var(--fg);
+		cursor: pointer;
+	}
+	.btn-secondary:hover { background: var(--surface-hover); }
+	.form-row { display: flex; gap: 6px; margin-top: 6px; }
+	.text-input {
+		flex: 1;
+		min-width: 0;
+		font-family: var(--mono);
 		font-size: 11px;
+		padding: 4px 8px;
+		border: 1px solid var(--border);
+		border-radius: 5px;
+		background: var(--surface);
+		color: var(--fg);
+	}
+	.text-input:focus { outline: 1px solid var(--focus); outline-offset: 0; border-color: var(--focus); }
+	.hint { font-size: 11px; line-height: 1.4; color: var(--muted); }
+	.btn-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+	/* Empty state */
+	.empty {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
 		text-align: center;
-		padding: 12px 0;
-		line-height: 1.4;
+		gap: 4px;
+		padding: 12px 10px;
+		border: 1px dashed var(--border);
+		border-radius: var(--radius);
+	}
+	.empty-icon {
+		width: 26px;
+		height: 26px;
+		display: grid;
+		place-items: center;
+		border-radius: 50%;
+		color: var(--muted);
+		background: var(--surface-hover);
+		margin-bottom: 2px;
+	}
+	.empty-title { font-size: 12px; font-weight: 600; }
+	.empty-desc { font-size: 11px; line-height: 1.4; color: var(--muted); max-width: 220px; margin-bottom: 4px; }
+
+	/* Busy indicator */
+	.progress {
+		position: fixed;
+		top: 0; left: 0; right: 0;
+		height: 2px;
+		overflow: hidden;
+		opacity: 0;
+		transition: opacity 150ms ease;
+	}
+	.progress.active { opacity: 1; }
+	.progress::after {
+		content: "";
+		position: absolute;
+		inset: 0;
+		width: 30%;
+		background: var(--vscode-progressBar-background, var(--accent));
+		animation: slide 1.1s ease-in-out infinite;
+	}
+	@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(400%); } }
+	@media (prefers-reduced-motion: reduce) {
+		.progress::after { animation: none; width: 100%; }
 	}
 </style>
 </head>
 <body>
-	<div class="header-section">
-		<div style="display: flex; align-items: center; gap: 8px;">
-			<button class="btn-action" data-action="backToChat">← Chat</button>
-			<span class="title">Connected Hardware</span>
+	<div class="progress" id="progress" role="progressbar" aria-label="Working"></div>
+
+	<div class="stats" id="stats"></div>
+
+	<section class="section" aria-labelledby="hostTitle">
+		<div class="section-head">
+			<span class="section-title" id="hostTitle">This device</span>
 		</div>
-		<button class="btn-action" data-action="refreshHardware">Refresh</button>
-	</div>
+		<div class="list" id="hostNodeContainer"></div>
+	</section>
 
-	<div class="card">
-		<span style="font-weight: 600; font-size: 11px; color: var(--muted);">HOST SYSTEM</span>
-		<div id="hostNodeContainer"></div>
-	</div>
+	<section class="section" aria-labelledby="localTitle">
+		<div class="section-head">
+			<span class="section-title" id="localTitle">Local LLM</span>
+			<span class="spacer"></span>
+			<span id="llamacppPill"></span>
+		</div>
+		<div class="node">
+			<div class="node-icon" id="llamacppIcon"></div>
+			<div class="node-text">
+				<div class="node-name"><span>llama-server</span></div>
+				<div class="node-sub" id="llamacppBaseUrl"></div>
+				<div class="hint" id="llamacppModel"></div>
+			</div>
+		</div>
+		<div class="form-row">
+			<input class="text-input" id="llamacppWorkerInput" placeholder="RPC worker 192.168.68.54:50052" aria-label="RPC worker address" />
+			<button class="btn-secondary" data-action="llamacppSaveWorker">Save</button>
+		</div>
+		<div class="hint" id="llamacppStatus"></div>
+		<div class="btn-row">
+			<button class="btn-primary" data-action="llamacppStart">Start</button>
+			<button class="btn-secondary" data-action="llamacppStop">Stop</button>
+			<button class="btn-secondary" data-action="llamacppSetModel">Model file</button>
+		</div>
+	</section>
 
-	<div class="header-section" style="margin-top: 4px;">
-		<span class="title">LAN Worker Nodes</span>
-		<button class="btn-action" data-action="pairWorker">+ Pair Worker</button>
-	</div>
-
-	<div id="workerList" style="display: flex; flex-direction: column; gap: 6px;"></div>
+	<section class="section" aria-labelledby="workersTitle">
+		<div class="section-head">
+			<span class="section-title" id="workersTitle">LAN workers</span>
+			<span class="count" id="workerCount">0</span>
+			<span class="spacer"></span>
+			<button class="icon-btn" data-action="pairWorker" title="Pair worker" aria-label="Pair worker">
+				<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg>
+			</button>
+		</div>
+		<div class="list" id="workerList"></div>
+	</section>
 
 <script nonce="${nonce}">
 	const vscode = acquireVsCodeApi();
 
+	const ICONS = {
+		chip: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6.5 1.5v2M9.5 1.5v2M6.5 12.5v2M9.5 12.5v2M1.5 6.5h2M1.5 9.5h2M12.5 6.5h2M12.5 9.5h2"/></svg>',
+		server: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="2" y="2.5" width="12" height="4.5" rx="1.2"/><rect x="2" y="9" width="12" height="4.5" rx="1.2"/><path d="M4.75 4.75h.01M4.75 11.25h.01"/></svg>',
+		close: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
+		network: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="4" cy="8" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="12" cy="12" r="2"/><path d="M5.8 7.1l4.4-2.2M5.8 8.9l4.4 2.2"/></svg>',
+		plus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg>'
+	};
+
 	function escapeHtml(str) {
-		if (!str) return '';
+		if (str === undefined || str === null) return '';
 		return String(str)
 			.replace(/&/g, '&amp;')
 			.replace(/</g, '&lt;')
@@ -527,6 +831,8 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider, vsco
 		const msg = event.data;
 		if (msg.type === 'state') {
 			render(msg.state);
+		} else if (msg.type === 'busy') {
+			document.getElementById('progress').classList.toggle('active', !!msg.busy);
 		}
 	});
 
@@ -543,61 +849,140 @@ export class OmenClusterViewProvider implements vscode.WebviewViewProvider, vsco
 			vscode.postMessage({ type: 'pairNewWorker' });
 		} else if (action === 'removeWorker' && nodeId) {
 			vscode.postMessage({ type: 'removeWorker', nodeId });
-		} else if (action === 'backToChat') {
-			vscode.postMessage({ type: 'backToChat' });
+		} else if (action === 'llamacppStart') {
+			vscode.postMessage({ type: 'llamacppStart' });
+		} else if (action === 'llamacppStop') {
+			vscode.postMessage({ type: 'llamacppStop' });
+		} else if (action === 'llamacppSetModel') {
+			vscode.postMessage({ type: 'llamacppSetModel' });
+		} else if (action === 'llamacppSaveWorker') {
+			const input = document.getElementById('llamacppWorkerInput');
+			vscode.postMessage({ type: 'llamacppSetWorker', worker: input ? input.value : '' });
 		}
 	});
 
-	function render(state) {
-		const hostContainer = document.getElementById('hostNodeContainer');
-		const workerList = document.getElementById('workerList');
-
-		const host = state.nodes.find(n => n.role === 'host');
-		if (host) {
-			hostContainer.innerHTML = \`
-				<div class="node-item">
-					<div class="node-top">
-						<span class="node-name">\${escapeHtml(host.name)}</span>
-						<span class="status-badge">ONLINE</span>
-					</div>
-					<div class="node-details">
-						<span>IP: \${escapeHtml(host.ip)}</span>
-						<span>RAM: \${Number(host.vramGb)} GB</span>
-						<span>Threads: \${Number(host.cpuThreads)}</span>
-					</div>
-				</div>
-			\`;
-		}
-
-		const workers = state.nodes.filter(n => n.role === 'worker');
-		if (workers.length === 0) {
-			workerList.innerHTML = '<div class="empty-hint">No external LAN workers connected.<br>Click "+ Pair Worker" to connect your Nitro 5.</div>';
-		} else {
-			workerList.innerHTML = workers.map(w => {
-				const badgeClass = w.status === 'paired' ? 'status-badge' : 'status-unverified';
-				const badgeText = w.status === 'paired' ? 'VERIFIED' : 'UNVERIFIED';
-				const modelsCount = w.installedModels ? w.installedModels.length : 0;
-				const specsText = w.status === 'paired'
-					? \`<span>Models: \${modelsCount} ready</span>\`
-					: \`<span>\${escapeHtml(w.gpuName)}</span>\`;
-				return \`
-					<div class="node-item">
-						<div class="node-top">
-							<span class="node-name">\${escapeHtml(w.name)}</span>
-							<div style="display: flex; gap: 6px; align-items: center;">
-								<span class="\${badgeClass}">\${badgeText}</span>
-								<button class="btn-action" style="padding: 1px 6px; font-size: 10px;" data-action="removeWorker" data-node-id="\${escapeHtml(w.id)}">✕</button>
-							</div>
-						</div>
-						<div class="node-details">
-							<span>IP: \${escapeHtml(w.ip)}:11434</span>
-							\${specsText}
-						</div>
-					</div>
-				\`;
-			}).join('');
-		}
+	function stat(value, unit, label) {
+		return '<div class="stat"><div class="stat-value">' + escapeHtml(value)
+			+ (unit ? '<small>' + escapeHtml(unit) + '</small>' : '')
+			+ '</div><div class="stat-label">' + escapeHtml(label) + '</div></div>';
 	}
+
+	function render(state) {
+		const host = state.nodes.find(n => n.role === 'host');
+		const workers = state.nodes.filter(n => n.role === 'worker');
+		const ready = workers.filter(w => w.status === 'paired');
+		const llamacpp = state.llamacpp || { running: false, baseUrl: '', modelPath: '', rpcServers: '', models: [] };
+
+		const pill = document.getElementById('llamacppPill');
+		if (pill) {
+			pill.innerHTML = '<span class="pill' + (llamacpp.running ? '' : ' warn') + '">' + (llamacpp.running ? 'Ready' : 'Stopped') + '</span>';
+		}
+		const icon = document.getElementById('llamacppIcon');
+		if (icon) {
+			icon.innerHTML = ICONS.server;
+			if (!llamacpp.running) {
+				icon.classList.add('warn');
+			} else {
+				icon.classList.remove('warn');
+			}
+		}
+		const baseUrlEl = document.getElementById('llamacppBaseUrl');
+		if (baseUrlEl) {
+			baseUrlEl.textContent = llamacpp.baseUrl || 'http://127.0.0.1:8080';
+		}
+		const modelEl = document.getElementById('llamacppModel');
+		if (modelEl) {
+			const fileName = String(llamacpp.modelPath || '').split('/').pop() || 'No model selected';
+			const modelNames = (llamacpp.models || []).slice(0, 2).join(', ');
+			modelEl.textContent = llamacpp.modelPath ? fileName + (modelNames ? ' · ' + modelNames : '') : 'Select a .gguf file to start';
+		}
+		const workerInput = document.getElementById('llamacppWorkerInput');
+		if (workerInput && document.activeElement !== workerInput) {
+			workerInput.value = llamacpp.rpcServers || '';
+		}
+		const statusEl = document.getElementById('llamacppStatus');
+		if (statusEl) {
+			if (llamacpp.running) {
+				statusEl.textContent = llamacpp.rpcServers ? 'Running with RPC worker ' + llamacpp.rpcServers : 'Running on this device';
+			} else if (llamacpp.lastError) {
+				statusEl.textContent = String(llamacpp.lastError).slice(0, 160);
+			} else {
+				statusEl.textContent = llamacpp.rpcServers ? 'Worker saved. Press Start.' : 'Optional: add an RPC worker, then press Start.';
+			}
+		}
+
+		// Summary
+		const totalMem = (host ? Number(host.vramGb) : 0) + ready.reduce((acc, w) => acc + Number(w.vramGb || 0), 0);
+		const totalThreads = (host ? Number(host.cpuThreads) : 0) + ready.reduce((acc, w) => acc + Number(w.cpuThreads || 0), 0);
+		document.getElementById('stats').innerHTML =
+			stat(1 + ready.length, '', ready.length ? 'Nodes' : 'Node')
+			+ stat(totalMem, 'GB', 'Memory')
+			+ stat(totalThreads, '', 'Threads');
+
+		// Host
+		const hostContainer = document.getElementById('hostNodeContainer');
+		if (host) {
+			const hostName = String(host.name || '').replace(/\\s*\\(Host Device\\)\\s*$/, '');
+			hostContainer.innerHTML = \`
+				<div class="node">
+					<div class="node-icon">\${ICONS.chip}</div>
+					<div class="node-text">
+						<div class="node-name"><span>\${escapeHtml(hostName)}</span><span class="tag">HOST</span></div>
+						<div class="node-sub">\${escapeHtml(host.ip)}</div>
+					</div>
+					<div class="node-trail"><span class="pill">Online</span></div>
+					<div class="meta">
+						<span class="chip">\${Number(host.vramGb)} GB memory</span>
+						<span class="chip">\${Number(host.cpuThreads)} threads</span>
+					</div>
+				</div>\`;
+		}
+
+		// Workers
+		document.getElementById('workerCount').textContent = String(workers.length);
+		const workerList = document.getElementById('workerList');
+		if (workers.length === 0) {
+			workerList.innerHTML = \`
+				<div class="empty">
+					<div class="empty-icon">\${ICONS.network}</div>
+					<div class="empty-title">No workers paired</div>
+					<div class="empty-desc">Pair another machine running Ollama to share models and compute over your LAN.</div>
+					<button class="btn-primary" data-action="pairWorker">\${ICONS.plus}Pair worker</button>
+				</div>\`;
+			return;
+		}
+
+		workerList.innerHTML = workers.map(w => {
+			const isReady = w.status === 'paired';
+			const modelsCount = w.installedModels ? w.installedModels.length : 0;
+			const models = (w.installedModels || []).slice(0, 3)
+				.map(m => '<span class="chip">' + escapeHtml(m) + '</span>').join('');
+			const more = modelsCount > 3 ? '<span class="chip">+' + (modelsCount - 3) + ' more</span>' : '';
+			const meta = isReady
+				? (modelsCount ? models + more : '<span class="chip">No models installed</span>')
+				: '<span class="chip">Ollama unreachable</span>';
+			return \`
+				<div class="node">
+					<div class="node-icon \${isReady ? '' : 'warn'}">\${ICONS.server}</div>
+					<div class="node-text">
+						<div class="node-name"><span>\${escapeHtml(w.name)}</span></div>
+						<div class="node-sub">\${escapeHtml(w.ip)}:11434</div>
+					</div>
+					<div class="node-trail">
+						<span class="pill \${isReady ? '' : 'warn'}">\${isReady ? 'Ready' : 'Offline'}</span>
+						<button class="icon-btn reveal" data-action="removeWorker" data-node-id="\${escapeHtml(w.id)}" title="Remove worker" aria-label="Remove \${escapeHtml(w.name)}">\${ICONS.close}</button>
+					</div>
+					<div class="meta">\${meta}</div>
+				</div>\`;
+		}).join('');
+	}
+
+	window.addEventListener('keydown', e => {
+		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+			e.preventDefault();
+			vscode.postMessage({ type: 'toggleSidebar' });
+		}
+	});
 
 	vscode.postMessage({ type: 'ready' });
 </script>

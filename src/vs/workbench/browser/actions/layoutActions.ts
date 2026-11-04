@@ -293,10 +293,13 @@ export class ToggleSidebarVisibilityAction extends Action2 {
 	constructor() {
 		super({
 			id: ToggleSidebarVisibilityAction.ID,
-			title: localize2('toggleSidebar', 'Toggle Primary Side Bar Visibility'),
+			title: localize2('toggleSidebar', 'Toggle Sidebar'),
+			icon: panelLeftOffIcon,
 			toggled: {
 				condition: SideBarVisibleContext,
-				title: localize('primary sidebar', "Primary Side Bar"),
+				icon: panelLeftIcon,
+				title: localize('toggleSidebar', "Toggle Sidebar"),
+				tooltip: localize('toggleSidebar', "Toggle Sidebar"),
 				mnemonicTitle: localize({ key: 'primary sidebar mnemonic', comment: ['&& denotes a mnemonic'] }, "&&Primary Side Bar"),
 			},
 			metadata: {
@@ -309,6 +312,10 @@ export class ToggleSidebarVisibilityAction extends Action2 {
 				primary: KeyMod.CtrlCmd | KeyCode.KeyB
 			},
 			menu: [
+				{
+					id: MenuId.CommandCenter,
+					order: 0
+				},
 				{
 					id: MenuId.LayoutControlMenuSubmenu,
 					group: '0_workbench_layout',

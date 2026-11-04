@@ -7,9 +7,10 @@
 import * as vscode from "vscode";
 import { OmenCloudProvider, SecretManager } from "./secretManager.js";
 import { OllamaManager } from "./ollamaManager.js";
+import { LlamaCppManager } from "./llamacppManager.js";
 import { OmenClusterViewProvider } from "./clusterView.js";
 
-export type OmenModelProviderType = OmenCloudProvider | "ollama" | "lan";
+export type OmenModelProviderType = OmenCloudProvider | "ollama" | "lan" | "llamacpp";
 
 export interface OmenChatModelInfo extends vscode.LanguageModelChatInformation {
 	id: string;
@@ -31,6 +32,7 @@ export class OmenLanguageModelChatProvider implements vscode.LanguageModelChatPr
 	constructor(
 		private readonly secretManager: SecretManager,
 		private readonly clusterProvider?: OmenClusterViewProvider,
+		private readonly llamacppManager?: LlamaCppManager,
 	) {}
 
 	refresh(): void {
@@ -93,7 +95,57 @@ export class OmenLanguageModelChatProvider implements vscode.LanguageModelChatPr
 			}
 		}
 
-		// 3. DeepSeek Models
+		// 3. Local llama.cpp server managed by Omen
+		const llamacppConfig = vscode.workspace.getConfiguration("omen.providers.llamacpp");
+		if (llamacppConfig.get<boolean>("enabled", true)) {
+			const baseUrl = LlamaCppManager.getBaseUrl().replace(/\/+$/, "");
+			const llamacppModels = this.llamacppManager
+				? await this.llamacppManager.listModels()
+				: await LlamaCppManager.fetchModels(baseUrl);
+			if (llamacppModels.length > 0) {
+				for (const name of llamacppModels) {
+					models.push({
+						id: `llamacpp/${name}`,
+						name: `Local llama.cpp: ${name}`,
+						family: "llamacpp",
+						version: "local",
+						detail: `llama-server (${baseUrl})`,
+						maxInputTokens: 32768,
+						maxOutputTokens: 8192,
+						maxContextWindowTokens: 32768,
+						capabilities: { toolCalling: true },
+						provider: "llamacpp",
+						baseUrl: `${baseUrl}/v1`,
+						isBYOK: false,
+						isUserSelectable: true,
+						isDefault: models.length === 0,
+					});
+				}
+			} else {
+				const configuredModel = llamacppConfig.get<string>("modelPath", "");
+				if (configuredModel && configuredModel.trim()) {
+					const shortName = configuredModel.trim().split("/").pop() || "local-model";
+					models.push({
+						id: `llamacpp/${shortName}`,
+						name: `Local llama.cpp: ${shortName}`,
+						family: "llamacpp",
+						version: "local",
+						detail: `llama-server (${baseUrl})`,
+						maxInputTokens: 32768,
+						maxOutputTokens: 8192,
+						maxContextWindowTokens: 32768,
+						capabilities: { toolCalling: true },
+						provider: "llamacpp",
+						baseUrl: `${baseUrl}/v1`,
+						isBYOK: false,
+						isUserSelectable: true,
+						isDefault: models.length === 0,
+					});
+				}
+			}
+		}
+
+		// 4. DeepSeek Models
 		const deepseekConfig = vscode.workspace.getConfiguration("omen.providers.deepseek");
 		if (deepseekConfig.get<boolean>("enabled", true)) {
 			const baseUrl = deepseekConfig
@@ -421,7 +473,7 @@ export class OmenLanguageModelChatProvider implements vscode.LanguageModelChatPr
 		token: vscode.CancellationToken,
 	): Promise<void> {
 		let apiKey = "";
-		if (model.provider !== "ollama" && model.provider !== "lan") {
+		if (model.provider !== "ollama" && model.provider !== "lan" && model.provider !== "llamacpp") {
 			apiKey = (await this.secretManager.getKeyForProvider(model.provider)) || "";
 			if (!apiKey) {
 				const action = await vscode.window.showErrorMessage(
@@ -465,7 +517,8 @@ export class OmenLanguageModelChatProvider implements vscode.LanguageModelChatPr
 
 		const targetModelId = model.id
 			.replace(/^ollama\//, "")
-			.replace(/^lan\/[^/]+\//, "");
+			.replace(/^lan\/[^/]+\//, "")
+			.replace(/^llamacpp\//, "");
 
 		const controller = new AbortController();
 		token.onCancellationRequested(() => controller.abort());

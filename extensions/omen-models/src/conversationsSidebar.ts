@@ -64,10 +64,6 @@ export class OmenConversationsSidebarProvider
 					}
 					break;
 				}
-				case "openCodebase": {
-					await vscode.commands.executeCommand("workbench.view.explorer");
-					break;
-				}
 				case "openClusterHub": {
 					await vscode.commands.executeCommand("omen.openClusterHub");
 					break;
@@ -78,6 +74,12 @@ export class OmenConversationsSidebarProvider
 				}
 				case "openSettings": {
 					await vscode.commands.executeCommand("omen.openSettingsHub");
+					break;
+				}
+				case "toggleSidebar": {
+					await vscode.commands.executeCommand(
+						"workbench.action.toggleSidebarVisibility",
+					);
 					break;
 				}
 			}
@@ -335,9 +337,6 @@ export class OmenConversationsSidebarProvider
 		<div class="sidebar-row" data-action="openClusterHub">
 			<span class="row-title">LAN Compute</span>
 		</div>
-		<div class="sidebar-row" data-action="openCodebase">
-			<span class="row-title">Codebase</span>
-		</div>
 	</div>
 
 	<div id="threadsContainer" class="threads-scroll"></div>
@@ -426,9 +425,6 @@ export class OmenConversationsSidebarProvider
 					vscode.postMessage({ type: 'deleteConversation', sessionId });
 				}
 				break;
-			case 'openCodebase':
-				vscode.postMessage({ type: 'openCodebase' });
-				break;
 			case 'openClusterHub':
 				vscode.postMessage({ type: 'openClusterHub' });
 				break;
@@ -486,6 +482,13 @@ export class OmenConversationsSidebarProvider
 
 		container.innerHTML = html;
 	}
+
+	window.addEventListener('keydown', e => {
+		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+			e.preventDefault();
+			vscode.postMessage({ type: 'toggleSidebar' });
+		}
+	});
 
 	vscode.postMessage({ type: 'ready' });
 </script>

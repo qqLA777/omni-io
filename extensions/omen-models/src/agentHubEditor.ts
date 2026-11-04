@@ -105,6 +105,12 @@ export class AgentHubEditorProvider {
 					await vscode.commands.executeCommand("omen.openSettingsHub");
 					break;
 				}
+				case "toggleSidebar": {
+					await vscode.commands.executeCommand(
+						"workbench.action.toggleSidebarVisibility",
+					);
+					break;
+				}
 				case "openFileDiff": {
 					const session = diffManager.sessions.find(
 						(s) => s.id === msg.sessionId,
@@ -145,30 +151,135 @@ export class AgentHubEditorProvider {
 					}
 					break;
 				}
+				case "pickFolder": {
+					const currentFolder = diffManager.getSelectedFolderPath();
+					const recentFolders = diffManager.getRecentFolders();
+					const subfolders = await diffManager.getSubfoldersOfSelectedFolder();
+					const parentFolder = path.dirname(currentFolder);
+
+					interface FolderPickItem extends vscode.QuickPickItem {
+						folderPath?: string;
+						browse?: boolean;
+					}
+
+					const items: FolderPickItem[] = [
+						{
+							label: "Browse Folder...",
+							description: "Select any folder on your Mac for this conversation",
+							browse: true,
+						},
+						{
+							label: "Recent & Workspace Folders",
+							kind: vscode.QuickPickItemKind.Separator,
+						},
+						...recentFolders.map((folderPath) => ({
+							label:
+								folderPath === currentFolder
+									? `${path.basename(folderPath) || folderPath} (Active)`
+									: path.basename(folderPath) || folderPath,
+							description: folderPath,
+							folderPath,
+						})),
+					];
+
+					if (parentFolder && parentFolder !== currentFolder) {
+						items.push(
+							{
+								label: "Navigate",
+								kind: vscode.QuickPickItemKind.Separator,
+							},
+							{
+								label: `.. (${path.basename(parentFolder) || parentFolder})`,
+								description: parentFolder,
+								folderPath: parentFolder,
+							},
+						);
+					}
+
+					if (subfolders.length > 0) {
+						items.push({
+							label: `Subfolders in ${path.basename(currentFolder)}`,
+							kind: vscode.QuickPickItemKind.Separator,
+						});
+						for (const sub of subfolders) {
+							items.push({
+								label: path.basename(sub),
+								description: sub,
+								folderPath: sub,
+							});
+						}
+					}
+
+					const picked = await vscode.window.showQuickPick(items, {
+						placeHolder: `Select active codebase folder (Current: ${currentFolder})`,
+					});
+					if (!picked) {
+						break;
+					}
+
+					if (picked.browse) {
+						const uris = await vscode.window.showOpenDialog({
+							canSelectFolders: true,
+							canSelectFiles: false,
+							canSelectMany: false,
+							defaultUri: vscode.Uri.file(currentFolder),
+							openLabel: "Select Folder",
+						});
+						if (uris && uris[0]) {
+							await diffManager.setSelectedFolderPath(uris[0].fsPath);
+							await AgentHubEditorProvider._postState(diffManager);
+						}
+					} else if (picked.folderPath) {
+						await diffManager.setSelectedFolderPath(picked.folderPath);
+						await AgentHubEditorProvider._postState(diffManager);
+					}
+					break;
+				}
 				case "pickContextFile": {
-					const files = await vscode.workspace.findFiles(
-						"**/*.{ts,tsx,js,jsx,py,go,rs,json,md,css,html}",
-						"{**/node_modules/**,**/.git/**,**/out/**,**/dist/**}",
-						60,
-					);
-					if (files.length === 0) {
-						vscode.window.showInformationMessage("No workspace files found.");
+					const folderFiles = await diffManager.listFilesInSelectedFolder();
+					if (folderFiles.length === 0) {
+						vscode.window.showInformationMessage(
+							`No code files found in ${diffManager.getSelectedFolderPath()}.`,
+						);
 						break;
 					}
 					const picked = await vscode.window.showQuickPick(
-						files.map((f) => ({
-							label: path.basename(f.fsPath),
-							description: vscode.workspace.asRelativePath(f),
-							uri: f,
+						folderFiles.map((f) => ({
+							label: f.label,
+							description: f.relativePath,
+							fsPath: f.fsPath,
 						})),
-						{ placeHolder: "Attach codebase file (@file)" },
+						{
+							placeHolder: `Mention file from ${path.basename(diffManager.getSelectedFolderPath())} (@file)`,
+						},
 					);
 					if (picked && panel) {
 						void panel.webview.postMessage({
 							type: "addContextChip",
 							relativePath: picked.description,
 							fileName: picked.label,
+							fsPath: picked.fsPath,
 						});
+					}
+					break;
+				}
+				case "openContextFile": {
+					if (typeof msg.relativePath === "string" && msg.relativePath) {
+						const fullPath = path.resolve(
+							diffManager.getSelectedFolderPath(),
+							msg.relativePath,
+						);
+						try {
+							const doc = await vscode.workspace.openTextDocument(
+								vscode.Uri.file(fullPath),
+							);
+							await vscode.window.showTextDocument(
+								doc,
+								vscode.ViewColumn.Beside,
+							);
+						} catch {
+							// Ignore if file cannot be opened
+						}
 					}
 					break;
 				}
@@ -232,14 +343,19 @@ export class AgentHubEditorProvider {
 		}
 		const selectedModel: SelectableModelOption =
 			await diffManager.getSelectedModelOption();
+		const selectedFolderPath = diffManager.getSelectedFolderPath();
 		const workspaceName =
-			vscode.workspace.workspaceFolders?.[0]?.name || "omen";
+			path.basename(selectedFolderPath) ||
+			vscode.workspace.workspaceFolders?.[0]?.name ||
+			"omen";
 		const activeDoc = vscode.window.activeTextEditor?.document;
 		const activeFile =
 			activeDoc && activeDoc.uri.scheme === "file"
 				? {
 						fileName: path.basename(activeDoc.uri.fsPath),
-						relativePath: vscode.workspace.asRelativePath(activeDoc.uri),
+						relativePath: activeDoc.uri.fsPath.startsWith(selectedFolderPath)
+							? path.relative(selectedFolderPath, activeDoc.uri.fsPath)
+							: vscode.workspace.asRelativePath(activeDoc.uri),
 				  }
 				: null;
 
@@ -254,6 +370,7 @@ export class AgentHubEditorProvider {
 			selectedSessionId: diffManager.selectedSession?.id || null,
 			selectedModel,
 			workspaceName,
+			selectedFolderPath,
 			activeFile,
 		});
 	}
@@ -268,10 +385,10 @@ export class AgentHubEditorProvider {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
 <style>
 	:root {
-		/* Backgrounds (3 levels only) */
-		--bg-app:      #0f0f10;
-		--bg-sidebar:  #141415;
-		--bg-elevated: #1a1a1c;
+		/* Backgrounds (Antigravity reference dark + subtle top-center ambient navy glow) */
+		--bg-app:      #050507;
+		--bg-sidebar:  #0c0b11;
+		--bg-elevated: rgba(18, 18, 24, 0.85);
 
 		/* Borders: nearly invisible */
 		--border:      rgba(255,255,255,0.06);
@@ -304,7 +421,12 @@ export class AgentHubEditorProvider {
 		font-size: 13px;
 		line-height: 1.55;
 		color: var(--text-primary);
-		background: var(--bg-app);
+		background-color: var(--bg-app);
+		background-image:
+			radial-gradient(ellipse 68% 42% at 50% -4%, rgba(28, 58, 128, 0.22) 0%, rgba(18, 36, 82, 0.12) 38%, rgba(10, 16, 34, 0.05) 68%, rgba(5, 5, 7, 0) 100%),
+			radial-gradient(ellipse 42% 28% at 50% 18%, rgba(36, 72, 148, 0.08) 0%, rgba(5, 5, 7, 0) 100%);
+		background-repeat: no-repeat;
+		background-attachment: fixed;
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -441,9 +563,9 @@ export class AgentHubEditorProvider {
 		animation: fadeSlideUp 140ms cubic-bezier(0.22, 1, 0.36, 1);
 	}
 
-	/* Code Edit Diff Card with Accept and Reject Buttons */
+	/* Code Edit Unified Diff Card (Screenshot 2 Multi-File Tab Layout & Color Scheme) */
 	.diff-card {
-		background: var(--bg-sidebar);
+		background: #191716;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-md);
 		overflow: hidden;
@@ -453,48 +575,71 @@ export class AgentHubEditorProvider {
 	.diff-card:hover {
 		border-color: var(--border-focus);
 	}
-	.diff-header {
+	.diff-tabs-bar {
 		height: 36px;
-		padding: 0 12px;
 		display: flex;
-		align-items: center;
+		align-items: stretch;
 		justify-content: space-between;
-		gap: 10px;
-		background: var(--bg-elevated);
-		border-bottom: 1px solid var(--border);
+		background: #191716;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 	}
-	.diff-meta {
+	.diff-tabs-list {
 		display: flex;
-		align-items: center;
-		gap: 8px;
+		align-items: stretch;
+		overflow-x: auto;
 		min-width: 0;
+	}
+	.diff-tabs-list::-webkit-scrollbar {
+		display: none;
+	}
+	.diff-tab {
+		padding: 0 14px;
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+		font-family: var(--font-ui);
+		font-size: 12.5px;
+		color: rgba(255, 255, 255, 0.45);
+		background: #191716;
+		border-right: 1px solid rgba(255, 255, 255, 0.07);
 		cursor: pointer;
-	}
-	.diff-path {
-		font-family: var(--font-code);
-		font-size: 12px;
-		color: var(--text-primary);
 		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+		user-select: none;
+		transition: color 140ms ease, background 140ms ease;
 	}
-	.diff-counts {
-		font-family: var(--font-code);
-		font-size: 11.5px;
-		color: var(--text-secondary);
-		flex-shrink: 0;
+	.diff-tab:hover {
+		color: rgba(255, 255, 255, 0.78);
+		background: #1d1b19;
 	}
-	.diff-counts .add {
-		color: var(--accent);
+	.diff-tab.active {
+		color: rgba(255, 255, 255, 0.92);
+		background: #1e1c1a;
 	}
-	.diff-counts .del {
-		color: var(--text-tertiary);
+	.diff-tab-close {
+		font-size: 13px;
+		color: rgba(255, 255, 255, 0.45);
+		line-height: 1;
 	}
 	.diff-actions {
 		display: flex;
 		align-items: center;
 		gap: 6px;
+		padding: 0 10px;
 		flex-shrink: 0;
+	}
+	.diff-counts {
+		font-family: var(--font-code);
+		font-size: 11px;
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		margin-right: 4px;
+	}
+	.diff-counts .add {
+		color: #5ab87e;
+	}
+	.diff-counts .del {
+		color: #d15a5a;
 	}
 	.btn-diff {
 		height: 24px;
@@ -514,22 +659,67 @@ export class AgentHubEditorProvider {
 		border-color: var(--border-focus);
 	}
 	.btn-diff.accept {
-		background: var(--accent);
-		border-color: var(--accent);
+		background: #287346;
+		border-color: #38915c;
 		color: #ffffff;
 	}
 	.btn-diff.accept:hover {
-		opacity: 0.92;
+		background: #308753;
 	}
-	.diff-preview {
-		padding: 8px 12px;
+	.diff-unified-body {
+		padding: 10px 0;
+		background: #191716;
 		font-family: var(--font-code);
-		font-size: 11.5px;
-		line-height: 1.5;
-		color: var(--text-secondary);
-		max-height: 140px;
+		font-size: 12.5px;
+		line-height: 1.62;
+		max-height: 340px;
 		overflow-y: auto;
+		overflow-x: auto;
+	}
+	.diff-line {
+		display: flex;
+		align-items: baseline;
+		padding: 0 14px;
 		white-space: pre;
+		min-width: max-content;
+	}
+	.diff-line.ctx {
+		background: #191716;
+		color: #8fd1a8;
+	}
+	.diff-line.del {
+		background: #2b1818;
+		color: #9e8e8a;
+	}
+	.diff-line.add {
+		background: #16281e;
+		color: #8fd1a8;
+	}
+	.diff-sign {
+		width: 22px;
+		flex-shrink: 0;
+		user-select: none;
+		display: inline-block;
+		font-weight: 500;
+	}
+	.diff-line.del .diff-sign {
+		color: #d15a5a;
+	}
+	.diff-line.add .diff-sign {
+		color: #5ab87e;
+	}
+	.diff-line.ctx .diff-sign {
+		color: transparent;
+	}
+	.diff-code {
+		flex: 1;
+	}
+	.tok-str {
+		color: #c9a26d;
+	}
+	.tok-param {
+		color: #b8afa9;
+		font-style: italic;
 	}
 
 	/* Assistant Message: Plain Text (Zero Background / Zero Border) */
@@ -615,19 +805,19 @@ export class AgentHubEditorProvider {
 		color: var(--text-primary);
 	}
 
-	/* Code Block with Language Header & Copy Button */
+	/* Code Block with Language Header & Copy Button (Screenshot 2 Code Palette) */
 	.code-block-wrap {
 		margin: 10px 0;
-		background: var(--bg-sidebar);
+		background: #191716;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-md);
 		overflow: hidden;
 	}
 	.code-block-header {
-		height: 28px;
-		padding: 0 10px;
-		background: var(--bg-elevated);
-		border-bottom: 1px solid var(--border);
+		height: 30px;
+		padding: 0 12px;
+		background: #1e1c1a;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -635,7 +825,7 @@ export class AgentHubEditorProvider {
 	.code-lang {
 		font-family: var(--font-code);
 		font-size: 11px;
-		color: var(--text-tertiary);
+		color: rgba(255, 255, 255, 0.55);
 	}
 	.btn-copy-code {
 		background: transparent;
@@ -654,12 +844,13 @@ export class AgentHubEditorProvider {
 	}
 	.code-block-pre {
 		margin: 0;
-		padding: 10px 12px;
+		padding: 10px 14px;
 		overflow-x: auto;
 		font-family: var(--font-code);
-		font-size: 12px;
-		line-height: 1.5;
-		color: var(--text-primary);
+		font-size: 12.5px;
+		line-height: 1.6;
+		color: #8fd1a8;
+		background: #191716;
 	}
 
 	/* Bottom Centered 720px Input Area */
@@ -861,10 +1052,12 @@ export class AgentHubEditorProvider {
 		selectedSessionId: null,
 		selectedModel: { id: 'muse-spark-1.3', name: 'Meta Muse Spark 1.3' },
 		workspaceName: 'omen',
+		selectedFolderPath: '',
 		activeFile: null,
 		attachedFiles: [],
 		modeIndex: 0,
 		expandedTools: {},
+		activeDiffTabIndex: 0,
 	};
 
 	const codeBlocksStore = [];
@@ -877,6 +1070,64 @@ export class AgentHubEditorProvider {
 			.replace(/>/g, '&gt;')
 			.replace(/"/g, '&quot;')
 			.replace(/'/g, '&#39;');
+	}
+
+	function highlightCodeTokens(rawLine, isDeleted) {
+		const escaped = escapeHtml(rawLine);
+		if (isDeleted) {
+			return escaped;
+		}
+		// Highlight string literals and numeric constants in warm amber (#c9a26d) matching Screenshot 2
+		return escaped.replace(
+			/(&quot;[^&]*?&quot;|&#39;[^&]*?&#39;|\b\d+(?:\.\d+)?\b)/g,
+			'<span class="tok-str">$1</span>'
+		);
+	}
+
+	function buildUnifiedDiffHtml(originalText, modifiedText) {
+		const origLines = (originalText || '').split('\\n');
+		const modLines = (modifiedText || '').split('\\n');
+
+		// Simple Myers/LCS-style line diff for unified view
+		const origSet = new Set(origLines);
+		const modSet = new Set(modLines);
+		const rows = [];
+
+		let i = 0;
+		let j = 0;
+		const maxLines = 120;
+
+		while ((i < origLines.length || j < modLines.length) && rows.length < maxLines) {
+			const oLine = i < origLines.length ? origLines[i] : undefined;
+			const mLine = j < modLines.length ? modLines[j] : undefined;
+
+			if (oLine !== undefined && mLine !== undefined && oLine === mLine) {
+				rows.push({ kind: 'ctx', sign: ' ', text: oLine });
+				i++;
+				j++;
+			} else if (oLine !== undefined && !modSet.has(oLine)) {
+				rows.push({ kind: 'del', sign: '-', text: oLine });
+				i++;
+			} else if (mLine !== undefined && !origSet.has(mLine)) {
+				rows.push({ kind: 'add', sign: '+', text: mLine });
+				j++;
+			} else if (oLine !== undefined) {
+				rows.push({ kind: 'del', sign: '-', text: oLine });
+				i++;
+			} else if (mLine !== undefined) {
+				rows.push({ kind: 'add', sign: '+', text: mLine });
+				j++;
+			}
+		}
+
+		return rows
+			.map(r => \`
+				<div class="diff-line \${r.kind}">
+					<span class="diff-sign">\${r.sign}</span>
+					<span class="diff-code">\${highlightCodeTokens(r.text, r.kind === 'del')}</span>
+				</div>
+			\`)
+			.join('');
 	}
 
 	function renderInlineMarkdown(text) {
@@ -906,7 +1157,7 @@ export class AgentHubEditorProvider {
 							<span class="code-lang">\${escapeHtml(lang)}</span>
 							<button class="btn-copy-code" data-action="copyCode" data-code-index="\${codeIdx}">Copy</button>
 						</div>
-						<pre class="code-block-pre"><code>\${escapeHtml(codeContent)}</code></pre>
+						<pre class="code-block-pre"><code>\${highlightCodeTokens(codeContent, false)}</code></pre>
 					</div>
 				\`;
 			}
@@ -972,6 +1223,7 @@ export class AgentHubEditorProvider {
 			state.selectedSessionId = msg.selectedSessionId || null;
 			if (msg.selectedModel) state.selectedModel = msg.selectedModel;
 			if (msg.workspaceName) state.workspaceName = msg.workspaceName;
+			if (msg.selectedFolderPath !== undefined) state.selectedFolderPath = msg.selectedFolderPath;
 			state.activeFile = msg.activeFile || null;
 			render();
 		} else if (msg.type === 'addContextChip' && msg.relativePath) {
@@ -1015,6 +1267,15 @@ export class AgentHubEditorProvider {
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			submitPrompt();
+		} else if (e.key === '@') {
+			const input = e.target;
+			const val = input.value || '';
+			const caret = input.selectionStart || 0;
+			if (caret === 0 || /\\s$/.test(val.slice(0, caret))) {
+				setTimeout(() => {
+					vscode.postMessage({ type: 'pickContextFile' });
+				}, 20);
+			}
 		}
 	});
 
@@ -1028,10 +1289,25 @@ export class AgentHubEditorProvider {
 		const toolKey = actionEl.getAttribute('data-tool-key');
 		const codeIdx = actionEl.getAttribute('data-code-index');
 		const chipPath = actionEl.getAttribute('data-chip-path');
+		const tabIdx = actionEl.getAttribute('data-tab-index');
 
 		switch (action) {
+			case 'pickFolder':
+				vscode.postMessage({ type: 'pickFolder' });
+				break;
 			case 'pickContextFile':
 				vscode.postMessage({ type: 'pickContextFile' });
+				break;
+			case 'openContextFile':
+				if (chipPath) {
+					vscode.postMessage({ type: 'openContextFile', relativePath: chipPath });
+				}
+				break;
+			case 'selectDiffTab':
+				if (tabIdx !== null) {
+					state.activeDiffTabIndex = Number(tabIdx) || 0;
+					render();
+				}
 				break;
 			case 'removeChip':
 				e.stopPropagation();
@@ -1096,15 +1372,19 @@ export class AgentHubEditorProvider {
 
 	function renderChips() {
 		const chipRow = document.getElementById('chipRow');
+		const activeSession = getActiveSession();
+		const folderLabel = (activeSession && activeSession.projectName) || state.workspaceName || 'Select Folder';
+		const folderTooltip = (activeSession && activeSession.folderPath) || state.selectedFolderPath || 'Click to select folder for this conversation';
+
 		let html = \`
-			<button class="context-chip" data-action="pickContextFile" title="Add file context (@file)">
-				<span>@ Add Context</span>
+			<button class="context-chip" data-action="pickFolder" title="\${escapeHtml(folderTooltip)}">
+				<span>\${escapeHtml(folderLabel)} ⌄</span>
 			</button>
 		\`;
 
 		if (state.activeFile && !state.attachedFiles.some(f => f.relativePath === state.activeFile.relativePath)) {
 			html += \`
-				<button class="context-chip code-chip" data-action="pickContextFile" title="Active editor file">
+				<button class="context-chip code-chip" data-action="openContextFile" data-chip-path="\${escapeHtml(state.activeFile.relativePath)}" title="Active file in folder">
 					<span>\${escapeHtml(state.activeFile.fileName)}</span>
 				</button>
 			\`;
@@ -1112,7 +1392,7 @@ export class AgentHubEditorProvider {
 
 		for (const f of state.attachedFiles) {
 			html += \`
-				<span class="context-chip code-chip">
+				<span class="context-chip code-chip" data-action="openContextFile" data-chip-path="\${escapeHtml(f.relativePath)}" title="Click to open \${escapeHtml(f.relativePath)}">
 					<span>@\${escapeHtml(f.fileName)}</span>
 					<span class="chip-remove" data-action="removeChip" data-chip-path="\${escapeHtml(f.relativePath)}">×</span>
 				</span>
@@ -1195,32 +1475,49 @@ export class AgentHubEditorProvider {
 					html += '</div>';
 				}
 
-				// Render Diff Cards with Accept and Reject buttons
+				// Render Unified Diff Card with Multi-File Tabs & Screenshot 2 Color Scheme
 				if (isLatestUserTurn && Array.isArray(session.filesChanged) && session.filesChanged.length > 0) {
-					for (const f of session.filesChanged) {
-						const previewLines = (f.modifiedContent || '').split('\\n').slice(0, 6).join('\\n');
-						html += \`
-							<div class="diff-card">
-								<div class="diff-header">
-									<div class="diff-meta" data-action="openFileDiff" data-session-id="\${escapeHtml(session.id)}" data-file-path="\${escapeHtml(f.filePath)}">
-										<span class="diff-path">\${escapeHtml(f.filePath)}</span>
-										<span class="diff-counts">
-											<span class="add">+\${f.additions}</span>
-											<span class="del">-\${f.deletions}</span>
-										</span>
-									</div>
-									<div class="diff-actions">
-										<button class="btn-diff" data-action="openFileDiff" data-session-id="\${escapeHtml(session.id)}" data-file-path="\${escapeHtml(f.filePath)}">Diff</button>
-										\${session.status === 'review' ? \`
-											<button class="btn-diff accept" data-action="acceptDiff" data-session-id="\${escapeHtml(session.id)}">Accept</button>
-											<button class="btn-diff" data-action="rejectDiff" data-session-id="\${escapeHtml(session.id)}">Reject</button>
-										\` : ''}
-									</div>
-								</div>
-								\${previewLines ? \`<div class="diff-preview">\${escapeHtml(previewLines)}</div>\` : ''}
+					const activeIdx = Math.min(state.activeDiffTabIndex || 0, session.filesChanged.length - 1);
+					const activeDiff = session.filesChanged[activeIdx] || session.filesChanged[0];
+					const tabsHtml = session.filesChanged.map((f, fIdx) => {
+						const baseName = f.filePath.split('/').pop() || f.filePath;
+						const isTabActive = fIdx === activeIdx;
+						return \`
+							<div class="diff-tab \${isTabActive ? 'active' : ''}" data-action="selectDiffTab" data-tab-index="\${fIdx}" title="\${escapeHtml(f.filePath)}">
+								<span>\${escapeHtml(baseName)}</span>
+								\${isTabActive ? '<span class="diff-tab-close">×</span>' : ''}
 							</div>
 						\`;
-					}
+					}).join('');
+
+					const unifiedLinesHtml = buildUnifiedDiffHtml(
+						activeDiff.originalContent || '',
+						activeDiff.modifiedContent || ''
+					);
+
+					html += \`
+						<div class="diff-card">
+							<div class="diff-tabs-bar">
+								<div class="diff-tabs-list">
+									\${tabsHtml}
+								</div>
+								<div class="diff-actions">
+									<span class="diff-counts">
+										<span class="add">+\${activeDiff.additions}</span>
+										<span class="del">-\${activeDiff.deletions}</span>
+									</span>
+									<button class="btn-diff" data-action="openFileDiff" data-session-id="\${escapeHtml(session.id)}" data-file-path="\${escapeHtml(activeDiff.filePath)}">Diff</button>
+									\${session.status === 'review' ? \`
+										<button class="btn-diff accept" data-action="acceptDiff" data-session-id="\${escapeHtml(session.id)}">Accept</button>
+										<button class="btn-diff" data-action="rejectDiff" data-session-id="\${escapeHtml(session.id)}">Reject</button>
+									\` : ''}
+								</div>
+							</div>
+							<div class="diff-unified-body">
+								\${unifiedLinesHtml}
+							</div>
+						</div>
+					\`;
 				}
 			} else {
 				html += \`
@@ -1234,6 +1531,13 @@ export class AgentHubEditorProvider {
 		column.innerHTML = html;
 		viewport.scrollTop = viewport.scrollHeight;
 	}
+
+	window.addEventListener('keydown', e => {
+		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+			e.preventDefault();
+			vscode.postMessage({ type: 'toggleSidebar' });
+		}
+	});
 
 	vscode.postMessage({ type: 'ready' });
 </script>

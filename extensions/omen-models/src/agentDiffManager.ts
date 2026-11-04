@@ -5,6 +5,7 @@
 /* eslint-disable local/code-no-unexternalized-strings */
 import * as vscode from "vscode";
 import * as path from "path";
+import * as fs from "fs";
 import { SecretManager } from "./secretManager.js";
 import { OllamaManager } from "./ollamaManager.js";
 
@@ -37,6 +38,7 @@ export interface AgentSession {
 	createdAt?: number;
 	pinned?: boolean;
 	projectName?: string;
+	folderPath?: string;
 	messages?: AgentChatMessage[];
 	status: "running" | "review" | "completed" | "rejected" | "error";
 	filesChanged: AgentFileDiff[];
@@ -56,6 +58,8 @@ export interface SelectableModelOption {
 
 const SESSIONS_STORAGE_KEY = "omen.agentSessions.v1";
 const SELECTED_MODEL_STORAGE_KEY = "omen.selectedModelId.v1";
+const SELECTED_FOLDER_STORAGE_KEY = "omen.selectedFolderPath.v1";
+const RECENT_FOLDERS_STORAGE_KEY = "omen.recentFolders.v1";
 
 export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 	public static readonly scheme = "omen-agent";
@@ -65,6 +69,8 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 	private _sessions: AgentSession[] = [];
 	private _selectedSessionId?: string;
 	private _selectedModelId: string;
+	private _selectedFolderPath: string;
+	private _recentFolders: string[] = [];
 	private readonly _activeCancellations = new Map<
 		string,
 		vscode.CancellationTokenSource
@@ -101,7 +107,177 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 			savedModelId === "muse-spark"
 				? "muse-spark-1.3"
 				: savedModelId;
+
+		const defaultFolder =
+			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const savedFolder = this._context.globalState.get<string>(
+			SELECTED_FOLDER_STORAGE_KEY,
+		);
+		this._selectedFolderPath =
+			savedFolder && fs.existsSync(savedFolder) ? savedFolder : defaultFolder;
+
+		const savedRecents = this._context.globalState.get<string[]>(
+			RECENT_FOLDERS_STORAGE_KEY,
+		);
+		this._recentFolders = Array.isArray(savedRecents)
+			? savedRecents.filter((p) => typeof p === "string" && fs.existsSync(p))
+			: [];
+		if (
+			this._selectedFolderPath &&
+			!this._recentFolders.includes(this._selectedFolderPath)
+		) {
+			this._recentFolders.unshift(this._selectedFolderPath);
+		}
+
 		this._loadPersistedSessions();
+	}
+
+	public getSelectedFolderPath(): string {
+		const activeSession = this.selectedSession;
+		if (activeSession?.folderPath && fs.existsSync(activeSession.folderPath)) {
+			return activeSession.folderPath;
+		}
+		return this._selectedFolderPath;
+	}
+
+	public getRecentFolders(): string[] {
+		const workspacePaths = (vscode.workspace.workspaceFolders || []).map(
+			(w) => w.uri.fsPath,
+		);
+		const combined = new Set<string>([
+			this.getSelectedFolderPath(),
+			...this._recentFolders,
+			...workspacePaths,
+		]);
+		return Array.from(combined).filter((p) => p && fs.existsSync(p));
+	}
+
+	public async setSelectedFolderPath(folderPath: string): Promise<void> {
+		if (!folderPath || !fs.existsSync(folderPath)) {
+			return;
+		}
+		this._selectedFolderPath = folderPath;
+		const activeSession = this.selectedSession;
+		if (activeSession) {
+			activeSession.folderPath = folderPath;
+			activeSession.projectName = path.basename(folderPath) || "omen";
+		}
+		this._recentFolders = [
+			folderPath,
+			...this._recentFolders.filter((p) => p !== folderPath),
+		].slice(0, 12);
+		await this._context.globalState.update(
+			SELECTED_FOLDER_STORAGE_KEY,
+			folderPath,
+		);
+		await this._context.globalState.update(
+			RECENT_FOLDERS_STORAGE_KEY,
+			this._recentFolders,
+		);
+		this._persistAndNotify();
+	}
+
+	public async getSubfoldersOfSelectedFolder(): Promise<string[]> {
+		const root = this.getSelectedFolderPath();
+		const ignored = new Set([
+			"node_modules",
+			".git",
+			"out",
+			"dist",
+			".build",
+			".vscode-test",
+			".next",
+			"target",
+		]);
+		try {
+			const entries = await fs.promises.readdir(root, { withFileTypes: true });
+			return entries
+				.filter(
+					(e) =>
+						e.isDirectory() && !e.name.startsWith(".") && !ignored.has(e.name),
+				)
+				.slice(0, 20)
+				.map((e) => path.join(root, e.name));
+		} catch {
+			return [];
+		}
+	}
+
+	public async listFilesInSelectedFolder(): Promise<
+		Array<{ label: string; relativePath: string; fsPath: string }>
+	> {
+		const root = this.getSelectedFolderPath();
+		const results: Array<{
+			label: string;
+			relativePath: string;
+			fsPath: string;
+		}> = [];
+		const ignored = new Set([
+			"node_modules",
+			".git",
+			"out",
+			"dist",
+			".build",
+			".next",
+			"target",
+			"coverage",
+		]);
+		const allowedExt = new Set([
+			".ts",
+			".tsx",
+			".js",
+			".jsx",
+			".py",
+			".go",
+			".rs",
+			".json",
+			".yaml",
+			".yml",
+			".md",
+			".css",
+			".html",
+			".vue",
+			".svelte",
+			".sh",
+			".toml",
+		]);
+
+		const walk = async (dir: string, depth: number): Promise<void> => {
+			if (depth > 3 || results.length >= 80) {
+				return;
+			}
+			let entries: fs.Dirent[];
+			try {
+				entries = await fs.promises.readdir(dir, { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const entry of entries) {
+				if (results.length >= 80) {
+					break;
+				}
+				if (entry.name.startsWith(".") || ignored.has(entry.name)) {
+					continue;
+				}
+				const fullPath = path.join(dir, entry.name);
+				if (entry.isDirectory()) {
+					await walk(fullPath, depth + 1);
+				} else if (entry.isFile()) {
+					const ext = path.extname(entry.name).toLowerCase();
+					if (allowedExt.has(ext)) {
+						const rel = path.relative(root, fullPath);
+						results.push({
+							label: entry.name,
+							relativePath: rel,
+							fsPath: fullPath,
+						});
+					}
+				}
+			}
+		};
+
+		await walk(root, 0);
+		return results;
 	}
 
 	public get sessions(): AgentSession[] {
@@ -378,6 +554,7 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 				createdAt: s.createdAt || Date.now(),
 				pinned: Boolean(s.pinned),
 				projectName: s.projectName || defaultProject,
+				folderPath: s.folderPath || this._selectedFolderPath,
 				messages,
 				status: wasRunning ? "error" : s.status,
 				timestamp: wasRunning ? "Interrupted" : s.timestamp,
@@ -399,6 +576,7 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 			createdAt: s.createdAt,
 			pinned: s.pinned,
 			projectName: s.projectName,
+			folderPath: s.folderPath,
 			messages: s.messages,
 			status: s.status,
 			filesChanged: s.filesChanged,
@@ -513,29 +691,38 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 			return;
 		}
 
-		const fileDiff = session.filesChanged[0];
-		let targetUri = session.targetUri;
-		if (!targetUri && session.targetUriString) {
-			targetUri = vscode.Uri.parse(session.targetUriString);
-		}
-		if (!targetUri && vscode.workspace.workspaceFolders?.[0]) {
-			targetUri = vscode.Uri.joinPath(
-				vscode.workspace.workspaceFolders[0].uri,
-				fileDiff.filePath,
-			);
-		}
+		const baseFolder = session.folderPath || this.getSelectedFolderPath();
+		for (const fileDiff of session.filesChanged) {
+			let targetUri: vscode.Uri | undefined;
+			if (session.filesChanged.length === 1) {
+				targetUri = session.targetUri;
+				if (!targetUri && session.targetUriString) {
+					targetUri = vscode.Uri.parse(session.targetUriString);
+				}
+			}
+			if (!targetUri && baseFolder) {
+				targetUri = vscode.Uri.file(path.resolve(baseFolder, fileDiff.filePath));
+			}
+			if (!targetUri && vscode.workspace.workspaceFolders?.[0]) {
+				targetUri = vscode.Uri.joinPath(
+					vscode.workspace.workspaceFolders[0].uri,
+					fileDiff.filePath,
+				);
+			}
 
-		if (targetUri) {
-			try {
-				const data = Buffer.from(fileDiff.modifiedContent, "utf8");
-				await vscode.workspace.fs.writeFile(targetUri, data);
-			} catch (err: unknown) {
-				const message = err instanceof Error ? err.message : String(err);
-				vscode.window.showErrorMessage(`Failed to write file to disk: ${message}`);
-				return;
+			if (targetUri) {
+				try {
+					const data = Buffer.from(fileDiff.modifiedContent, "utf8");
+					await vscode.workspace.fs.writeFile(targetUri, data);
+				} catch (err: unknown) {
+					const message = err instanceof Error ? err.message : String(err);
+					vscode.window.showErrorMessage(`Failed to write file to disk: ${message}`);
+					return;
+				}
 			}
 		}
 
+		const fileDiff = session.filesChanged[0];
 		session.status = "completed";
 		session.timestamp = "Completed";
 		session.activityLog.push({
@@ -579,25 +766,32 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 		const modelOption = await this.getSelectedModelOption();
 		const targetUri = await this._resolveTargetFile(prompt, specifiedUri);
 
+		const activeFolder = this.getSelectedFolderPath();
 		let originalContent = "";
 		let relativePath = "";
 		if (targetUri) {
 			try {
 				const rawBytes = await vscode.workspace.fs.readFile(targetUri);
 				originalContent = Buffer.from(rawBytes).toString("utf8");
-				relativePath = vscode.workspace.asRelativePath(targetUri);
+				relativePath = targetUri.fsPath.startsWith(activeFolder)
+					? path.relative(activeFolder, targetUri.fsPath)
+					: vscode.workspace.asRelativePath(targetUri);
 			} catch {
 				originalContent = "";
 			}
 		}
 
 		const projectName =
-			vscode.workspace.workspaceFolders?.[0]?.name || "omen";
+			path.basename(activeFolder) ||
+			vscode.workspace.workspaceFolders?.[0]?.name ||
+			"omen";
 		const existingSession = this.selectedSession;
 		let session: AgentSession;
 
 		if (existingSession) {
 			session = existingSession;
+			session.folderPath = session.folderPath || activeFolder;
+			session.projectName = path.basename(session.folderPath) || projectName;
 			if (!Array.isArray(session.messages)) {
 				session.messages = [];
 			}
@@ -630,6 +824,7 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 				createdAt: Date.now(),
 				pinned: false,
 				projectName,
+				folderPath: activeFolder,
 				messages: [
 					{
 						role: "user",
@@ -788,19 +983,33 @@ export class AgentDiffManager implements vscode.TextDocumentContentProvider {
 		specifiedUri?: vscode.Uri,
 	): Promise<vscode.Uri | undefined> {
 		const mentionMatch = prompt.match(
-			/@?([a-zA-Z0-9_\-\./]+\.(?:tsx?|jsx?|py|json|css|html|md|vue|svelte|go|rs|sh))/i,
+			/@?([a-zA-Z0-9_\-\./]+\.(?:tsx?|jsx?|py|json|yaml|yml|css|html|md|vue|svelte|go|rs|sh|toml))/i,
 		);
-		if (mentionMatch && vscode.workspace.workspaceFolders?.[0]) {
+		if (mentionMatch) {
 			const candidatePath = mentionMatch[1];
-			const uri = vscode.Uri.joinPath(
-				vscode.workspace.workspaceFolders[0].uri,
-				candidatePath,
-			);
-			try {
-				await vscode.workspace.fs.stat(uri);
-				return uri;
-			} catch {
-				// Ignore invalid path
+			const activeFolder = this.getSelectedFolderPath();
+			if (activeFolder) {
+				const folderCandidate = vscode.Uri.file(
+					path.resolve(activeFolder, candidatePath),
+				);
+				try {
+					await vscode.workspace.fs.stat(folderCandidate);
+					return folderCandidate;
+				} catch {
+					// Fall through to workspace folders
+				}
+			}
+			if (vscode.workspace.workspaceFolders?.[0]) {
+				const uri = vscode.Uri.joinPath(
+					vscode.workspace.workspaceFolders[0].uri,
+					candidatePath,
+				);
+				try {
+					await vscode.workspace.fs.stat(uri);
+					return uri;
+				} catch {
+					// Ignore invalid path
+				}
 			}
 		}
 

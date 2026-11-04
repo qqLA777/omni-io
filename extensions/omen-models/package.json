@@ -106,7 +106,55 @@
       {
         "command": "omen.openAgentHub",
         "title": "Open Built-in AI Chat in Center Editor",
+        "shortTitle": "Open Chat",
+        "category": "Omen",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "omen.cluster.refresh",
+        "title": "Refresh Hardware",
+        "category": "Omen",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "omen.cluster.pairWorker",
+        "title": "Pair LAN Worker",
+        "category": "Omen",
+        "icon": "$(add)"
+      },
+      {
+        "command": "omen.llamacpp.start",
+        "title": "Start llama-server",
+        "category": "Omen",
+        "icon": "$(play)"
+      },
+      {
+        "command": "omen.llamacpp.stop",
+        "title": "Stop llama-server",
+        "category": "Omen",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "omen.llamacpp.setModel",
+        "title": "Set llama.cpp Model File",
         "category": "Omen"
+      },
+      {
+        "command": "omen.llamacpp.setWorker",
+        "title": "Set llama.cpp RPC Worker",
+        "category": "Omen"
+      },
+      {
+        "command": "omen.docs.syncActiveFile",
+        "title": "Sync Active File",
+        "category": "Omen",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "omen.docs.addCollection",
+        "title": "New Vector Collection",
+        "category": "Omen",
+        "icon": "$(database)"
       },
       {
         "command": "omen.manageModels",
@@ -177,6 +225,38 @@
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "omen.cluster.pairWorker",
+          "when": "view == omen.clusterView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "omen.cluster.refresh",
+          "when": "view == omen.clusterView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "omen.openAgentHub",
+          "when": "view == omen.clusterView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "omen.docs.addCollection",
+          "when": "view == omen.docsView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "omen.docs.syncActiveFile",
+          "when": "view == omen.docsView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "omen.openAgentHub",
+          "when": "view == omen.docsView",
+          "group": "navigation@3"
+        }
+      ],
       "commandPalette": [
         {
           "command": "omen.openAgentHub"
@@ -279,6 +359,46 @@
           "type": "string",
           "default": "http://localhost:11434",
           "description": "Local or LAN Ollama endpoint URL"
+        },
+        "omen.providers.llamacpp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable local llama-server model"
+        },
+        "omen.providers.llamacpp.baseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8080",
+          "description": "Local llama-server frontend URL"
+        },
+        "omen.providers.llamacpp.port": {
+          "type": "number",
+          "default": 8080,
+          "description": "Local llama-server port"
+        },
+        "omen.providers.llamacpp.binaryPath": {
+          "type": "string",
+          "default": "llama-server",
+          "description": "llama-server binary path"
+        },
+        "omen.providers.llamacpp.modelPath": {
+          "type": "string",
+          "default": "",
+          "description": "Full path to local .gguf model file"
+        },
+        "omen.providers.llamacpp.rpcServers": {
+          "type": "string",
+          "default": "",
+          "description": "RPC worker address, for example 192.168.68.54:50052"
+        },
+        "omen.providers.llamacpp.contextSize": {
+          "type": "number",
+          "default": 2048,
+          "description": "Context size passed as -c"
+        },
+        "omen.providers.llamacpp.gpuLayers": {
+          "type": "number",
+          "default": 99,
+          "description": "GPU layers passed as -ngl"
         }
       }
     }

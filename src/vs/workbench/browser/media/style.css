@@ -399,6 +399,17 @@ body:has(> .monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light)) {
 	background-color: #141414F5 !important;
 }
 
+.monaco-workbench .part.sidebar > .content {
+	transition: opacity 250ms ease-out, transform 250ms ease-out;
+}
+
+@starting-style {
+	.monaco-workbench .part.sidebar > .content {
+		opacity: 0;
+		transform: translateX(-6px);
+	}
+}
+
 .monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.sidebar,
 .monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.auxiliarybar,
 .monaco-workbench.mac:not(.web):not(.hc-black):not(.hc-light) .part.panel {

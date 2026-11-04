@@ -5,6 +5,7 @@
 /* eslint-disable local/code-no-unexternalized-strings */
 import * as vscode from "vscode";
 import { SecretManager } from "./secretManager.js";
+import { LlamaCppManager } from "./llamacppManager.js";
 import { OllamaManager } from "./ollamaManager.js";
 import { OmenLanguageModelChatProvider } from "./modelProvider.js";
 import { OmenDocsViewProvider } from "./docsHubView.js";
@@ -20,11 +21,14 @@ export function activate(context: vscode.ExtensionContext): void {
 	// 1. Register Right/Panel Webview Views (Docs & RAG + Compute Cluster)
 	const docsProvider = new OmenDocsViewProvider(context);
 	const clusterProvider = new OmenClusterViewProvider(context);
+	const llamacppManager = new LlamaCppManager(context);
+	clusterProvider.setLlamaCppManager(llamacppManager);
 
-	// 2. Register Omen Language Model Chat Provider (Local Ollama + LAN Worker + Third-Party Cloud APIs)
+	// 2. Register Omen Language Model Chat Provider (Local Ollama + llama.cpp + LAN Worker + Third-Party Cloud APIs)
 	const provider = new OmenLanguageModelChatProvider(
 		secretManager,
 		clusterProvider,
+		llamacppManager,
 	);
 	const providerDisposable = vscode.lm.registerLanguageModelChatProvider(
 		"omen",
@@ -362,6 +366,39 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand("omen.openClusterHub", async () => {
 			await vscode.commands.executeCommand("omen.clusterView.focus");
 		}),
+		vscode.commands.registerCommand("omen.cluster.refresh", () =>
+			clusterProvider.refreshHardware(),
+		),
+		vscode.commands.registerCommand("omen.cluster.pairWorker", () =>
+			clusterProvider.pairWorker(),
+		),
+		vscode.commands.registerCommand("omen.llamacpp.start", async () => {
+			await llamacppManager.start();
+			clusterProvider.refreshHardware();
+			provider.refresh();
+			void vscode.lm.selectChatModels({ vendor: "omen" });
+		}),
+		vscode.commands.registerCommand("omen.llamacpp.stop", async () => {
+			await llamacppManager.stop();
+			clusterProvider.refreshHardware();
+			provider.refresh();
+			void vscode.lm.selectChatModels({ vendor: "omen" });
+		}),
+		vscode.commands.registerCommand("omen.llamacpp.setModel", async () => {
+			await llamacppManager.setModelPath();
+			provider.refresh();
+			void vscode.lm.selectChatModels({ vendor: "omen" });
+		}),
+		vscode.commands.registerCommand("omen.llamacpp.setWorker", async () => {
+			await llamacppManager.setWorker();
+			clusterProvider.refreshHardware();
+		}),
+		vscode.commands.registerCommand("omen.docs.syncActiveFile", () =>
+			docsProvider.syncActiveFile(),
+		),
+		vscode.commands.registerCommand("omen.docs.addCollection", () =>
+			docsProvider.addCollection(),
+		),
 		vscode.commands.registerCommand("omen.openAgentsView", async () => {
 			await vscode.commands.executeCommand("omen.conversationsView.focus");
 			await AgentHubEditorProvider.createOrShow(
@@ -437,6 +474,13 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		clusterStatusBarItem,
 		clusterProvider.onDidChangeState(() => updateClusterStatus()),
+		llamacppManager,
+		vscode.workspace.onDidChangeConfiguration((event) => {
+			if (event.affectsConfiguration("omen.providers.llamacpp")) {
+				provider.refresh();
+				void vscode.lm.selectChatModels({ vendor: "omen" });
+			}
+		}),
 	);
 
 	const docsStatusBarItem = vscode.window.createStatusBarItem(
